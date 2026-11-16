@@ -8,6 +8,7 @@ CTestTestfile.cmake
 Testing/
 compile_commands.json
 Makefile
+build*
 
 # Binários e objetos
 *.o
