@@ -1,0 +1,37 @@
+# Build (CMake)
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+Makefile
+
+# Binários e objetos
+*.o
+*.obj
+*.a
+*.so
+*.out
+*.exe
+duelo_magos
+test_wand_blue
+calibracao_hsv
+main
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Gravações e capturas de teste
+*.avi
+*.mp4
+*.mkv
