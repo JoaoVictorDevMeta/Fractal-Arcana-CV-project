@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(duelo_magos CXX)
+set(CMAKE_CXX_STANDARD 17)
+find_package(OpenCV REQUIRED)
+file(GLOB_RECURSE SRC src/*.cpp)
+add_executable(duelo_magos ${SRC})
+target_include_directories(duelo_magos PRIVATE src)
+target_link_libraries(duelo_magos PRIVATE ${OpenCV_LIBS})
