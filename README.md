@@ -38,11 +38,12 @@ Câmera → Rastreamento da varinha → Trajetória → Segmentação do gesto
 
 | Forma | Feitiço | Efeito |
 |---|---|---|
-| Círculo | Bola de Fogo | Projétil médio, dano médio |
+| Quadrado | Bola de Fogo | Projétil médio, dano médio |
 | Triângulo | Lança de Gelo | Projétil rápido, dano baixo, retarda o alvo |
-| Quadrado | Escudo | Bloqueia o próximo projétil |
+| Círuclo | Escudo | Bloqueia o próximo projétil |
 | Raio (zigue-zague) | Relâmpago | Projétil muito rápido, dano alto, custo alto de mana |
 | Linha horizontal | Rajada Arcana | Projétil básico, custo baixo |
+| Estrela | Especial | Projétil mais poderoso do jogo |
 
 Os valores de dano, custo de mana e cooldown ficam em `config/config.yaml` e podem ser balanceados sem recompilar.
 
