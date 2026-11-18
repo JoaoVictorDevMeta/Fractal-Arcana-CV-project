@@ -4,18 +4,22 @@
 
 // essa parte eu (jv) explico direitinho
 // é uma função pra deixar pontos equidistantes
-std::vector<cv::Point2f> equiDistPts(std::vector<cv::Point2f>& pts, int n){
-    if(pts.size() || n < 2 ){
+std::vector<cv::Point2f> FeatureExtractor::equiDistPts(const std::vector<cv::Point2f> &pts, int n)
+{
+    if (pts.size() < 2 || n < 2)
+    {
         return {};
     }
 
     std::vector<float> acum(pts.size(), 0.0);
-    for ( size_t i = 1; i < pts.size(); i++){
-        acum[i] = acum[i - 1] + cv::norm(pts[i] - pts[i - 1]);
+    for (size_t i = 1; i < pts.size(); i++)
+    {
+        acum[i] = acum[i - 1] + static_cast<float>(cv::norm(pts[i] - pts[i - 1]));
     } // comprimento acumulado
 
     float total = acum.back();
-    if(total <= 1e-6f){
+    if (total <= 1e-6f)
+    {
         return {};
     }
 
@@ -28,13 +32,16 @@ std::vector<cv::Point2f> equiDistPts(std::vector<cv::Point2f>& pts, int n){
     float target = step;
     // two-pointer de leve
     // ponteiros: i e j+target
-    for(int i = 1; i < n-1; i++){
-        while (j < pts.size() && acum[j] < target){
+    for (int i = 1; i < n - 1; i++)
+    {
+        while (j < pts.size() && acum[j] < target)
+        {
             j++;
         }
 
-        if(j >= pts.size()) break;
-        float seg = acum[j] - acum[j -1];
+        if (j >= pts.size())
+            break;
+        float seg = acum[j] - acum[j - 1];
         float t = (seg > 1e-6f) ? (target - acum[j - 1]) / seg : 0.f;
         out.push_back(pts[j - 1] + t * (pts[j] - pts[j - 1]));
         target += step;
@@ -44,15 +51,20 @@ std::vector<cv::Point2f> equiDistPts(std::vector<cv::Point2f>& pts, int n){
     return out;
 }
 
-std::vector<cv::Point2f> normalize(std::vector<cv::Point2f>& pts){
-    if (pts.empty()) return {};
+std::vector<cv::Point2f> FeatureExtractor::normalize(const std::vector<cv::Point2f> &pts)
+{
+    if (pts.empty())
+        return {};
     cv::Point2f c(0.0, 0.0);
-    for (const auto& p : pts) c += p;
+    for (const auto &p : pts)
+        c += p;
     c *= 1.f / (float)pts.size();
 
     float rMax = 0.0;
-    for (const auto& p : pts) rMax = std::max(rMax, cv::norm(p - c));
-    if (rMax < 1e-6) return {};
+    for (const auto &p : pts)
+        rMax = std::max(rMax, static_cast<float>(cv::norm(p - c)));
+    if (rMax < 1e-6)
+        return {};
 
     std::vector<cv::Point2f> out(pts.size());
     for (size_t i = 0; i < pts.size(); ++i)
