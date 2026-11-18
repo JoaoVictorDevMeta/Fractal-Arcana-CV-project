@@ -24,3 +24,15 @@ struct ShapeResult {
     float confidence = 0.0;
     std::string resultText;
 };
+
+struct ShapeFeatures {
+    bool closed = false;
+    int numVertices = 0;
+    double area = 0.0;
+    double perimeter = 0.0;
+    float circularity = 0.0;
+    float lineAngleDeg = 0.0;
+    float maxPerpDev = 0.0;
+    float cornerDefinition = 0.0;
+    float radialRatio = 0.0;
+};
