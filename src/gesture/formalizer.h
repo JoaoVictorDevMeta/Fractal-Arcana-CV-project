@@ -1,7 +1,13 @@
 #pragma once
 #include "gesture/shapes.h"
-#include <vector>
 
-std::vector<cv::Point2f> resample(const std::vector<cv::Point2f>& pts, int n = 64);
+class FeatureExtractor {
+    private:
+        
+    public:
+        static std::vector<cv::Point2f> equiDistPts(const std::vector<cv::Point2f>& pts, int n = 64);
+        static std::vector<cv::Point2f> normalize(const std::vector<cv::Point2f>& pts);
 
-std::vector<cv::Point2f> normalize(const std::vector<cv::Point2f>& pts);
+        ShapeFeatures extract(std::vector<cv::Point2f>& pts);
+};
+

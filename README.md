@@ -137,6 +137,8 @@ duelo-magos/
 └── tests/             # testes unitários e dataset de gestos
 ```
 
+
+
 ## Como o reconhecimento funciona
 
 **Rastreamento:** flip do frame, conversão para HSV, `inRange` por jogador (dentro da sua metade), limpeza morfológica, maior contorno e centroide via `moments`. Um filtro de Kalman suaviza o movimento e preenche pequenas perdas de detecção.

@@ -4,7 +4,7 @@
 
 // essa parte eu (jv) explico direitinho
 // é uma função pra deixar pontos equidistantes
-std::vector<cv::Point2f> formalizer(std::vector<cv::Point2f>& pts, int n){
+std::vector<cv::Point2f> equiDistPts(std::vector<cv::Point2f>& pts, int n){
     if(pts.size() || n < 2 ){
         return {};
     }
@@ -27,7 +27,7 @@ std::vector<cv::Point2f> formalizer(std::vector<cv::Point2f>& pts, int n){
     size_t j = 1;
     float target = step;
     // two-pointer de leve
-    // ponteiros: i e k+target
+    // ponteiros: i e j+target
     for(int i = 1; i < n-1; i++){
         while (j < pts.size() && acum[j] < target){
             j++;
@@ -41,5 +41,21 @@ std::vector<cv::Point2f> formalizer(std::vector<cv::Point2f>& pts, int n){
     }
 
     out.push_back(pts.back());
+    return out;
+}
+
+std::vector<cv::Point2f> normalize(std::vector<cv::Point2f>& pts){
+    if (pts.empty()) return {};
+    cv::Point2f c(0.0, 0.0);
+    for (const auto& p : pts) c += p;
+    c *= 1.f / (float)pts.size();
+
+    float rMax = 0.0;
+    for (const auto& p : pts) rMax = std::max(rMax, cv::norm(p - c));
+    if (rMax < 1e-6) return {};
+
+    std::vector<cv::Point2f> out(pts.size());
+    for (size_t i = 0; i < pts.size(); ++i)
+        out[i] = (pts[i] - c) / rMax;
     return out;
 }
