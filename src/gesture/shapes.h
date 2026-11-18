@@ -15,19 +15,16 @@ enum class Shape {
     Nenhum,  
 };
 
-struct Stroke {
-    std::vector<cv::Point2f> pts;
-};
-
 struct ShapeResult {
     Shape shape = Shape::Nenhum;
-    float confidence = 0.0;
+    float confidence = 0.0f;
     std::string resultText;
 };
 
 struct ShapeFeatures {
     bool closed = false;
     int numVertices = 0;
+    int numFourVertices = 0;
     double area = 0.0;
     double perimeter = 0.0;
     float circularity = 0.0;
@@ -35,4 +32,7 @@ struct ShapeFeatures {
     float maxPerpDev = 0.0;
     float cornerDefinition = 0.0;
     float radialRatio = 0.0;
+    int turns = 0; 
+    float fourFold = 0.0f;    
+    bool altRadii = false; 
 };
