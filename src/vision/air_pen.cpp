@@ -1,11 +1,11 @@
 #include "vision/air_pen.h"
 #include <opencv2/imgproc.hpp>
 
-void AirPen::reset(const cv::Size& size) {
+void AirPen::reset(cv::Size size) {
     canvas = cv::Mat::zeros(size, CV_8UC3);
     hasLast_ = hasSmooth_ = false;
     missed_ = 0;
-    resetStroke(); // Garante que o traço seja limpo ao dar reset na tela
+    resetStroke();
 }
 
 void AirPen::resetStroke() {
@@ -15,14 +15,18 @@ void AirPen::resetStroke() {
     idleFrames_ = 0;
 }
 
-void AirPen::update(const Detection& d) {
+void AirPen::update(Detection& d) {
     if (canvas.empty()) return;
 
     if (!d.found) {
         missed_++;
         if (missed_ > maxMissed && hasLast_) {
             hasLast_ = hasSmooth_ = false;
-            strokePending_ = true; // Avisa que o traço terminou e aguarda classificação
+            if (assistant_.totalLength(currentStroke_) > 100.0f) {
+                strokePending_ = true;
+            } else {
+                resetStroke();
+            }
         }
         return;
     }
@@ -32,51 +36,61 @@ void AirPen::update(const Detection& d) {
     }
     missed_ = 0;
 
-    if (!penDown) { hasLast_ = hasSmooth_ = false; return; }
+    if (!penDown) {
+        hasLast_ = hasSmooth_ = false;
+        return;
+    }
 
     cv::Point2f p = d.center;
     if (hasSmooth_) p = alpha * d.center + (1.f - alpha) * smooth_;
-    smooth_ = p; hasSmooth_ = true;
+    smooth_ = p;
+    hasSmooth_ = true;
 
     if (hasLast_) {
-        // Desenha na tela
-        cv::line(canvas,
-                 cv::Point(cvRound(last_.x), cvRound(last_.y)),
-                 cv::Point(cvRound(p.x),    cvRound(p.y)),
-                 color, thickness, cv::LINE_AA);
-        currentStroke_.push_back(p);
+        // Só registra ponto no vetor se houve deslocamento real (evita acúmulo de pontos parados)
+        if (currentStroke_.empty() || cv::norm(p - currentStroke_.back()) >= minStepDist) {
+            cv::line(canvas,
+                     cv::Point(cvRound(last_.x), cvRound(last_.y)),
+                     cv::Point(cvRound(p.x), cvRound(p.y)),
+                     color, thickness, cv::LINE_AA);
+            currentStroke_.push_back(p);
+        }
 
-        // 2. LÓGICA DE PAUSA (IDLE) - "Segurar parado para lançar"
         if (idleFrames_ == 0) {
-            idleAnchor_ = p; // Marca onde ele começou a desacelerar/parar
+            idleAnchor_ = p;
         }
 
         float distFromAnchor = cv::norm(p - idleAnchor_);
-        
         if (distFromAnchor < IDLE_RADIUS) {
-            idleFrames_++; // Ele está quase parado
+            idleFrames_++;
         } else {
-            idleAnchor_ = p; // Ele voltou a se mover
+            idleAnchor_ = p;
             idleFrames_ = 0;
         }
 
-        // Se ficou parado tempo suficiente:
+        // Como pontos parados não são adicionados ao vetor, não precisamos apagar o fim do traço
         if (idleFrames_ >= MAX_IDLE_FRAMES) {
-            // CORTE INTELIGENTE: Remove os pontos "parados" do final do traço
-            // Assim a IA não vê o "borrão" que a varinha parada criou.
-            if (currentStroke_.size() > (size_t)idleFrames_) {
-                currentStroke_.resize(currentStroke_.size() - idleFrames_);
+            if (assistant_.totalLength(currentStroke_) > 100.0f) {
+                strokePending_ = true;
+            } else {
+                resetStroke();
             }
-            
-            strokePending_ = true;
-            idleFrames_ = 0; 
+            idleFrames_ = 0;
         }
+    } else {
+        currentStroke_.push_back(p);
     }
-    last_ = p; hasLast_ = true;
+
+    last_ = p;
+    hasLast_ = true;
+}
+
+void AirPen::renderAssistant(cv::Mat& frame) {
+    assistant_.renderOverlay(frame, currentStroke_);
 }
 
 std::vector<cv::Point2f> AirPen::getStroke() {
-    return currentStroke_;
+    return assistant_.smoothStroke(currentStroke_, 2);
 }
 
 bool AirPen::hasFinishedStroke() {

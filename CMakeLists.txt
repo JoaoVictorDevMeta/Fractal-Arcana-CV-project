@@ -7,7 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(OpenCV REQUIRED)
 
 # --- Jogo -------------------------------------------------------------------
-file(GLOB_RECURSE SRC src/*.cpp)
+file(GLOB_RECURSE SRC CONFIGURE_DEPENDS src/*.cpp)
 if(SRC)
   add_executable(duelo_magos ${SRC})
   target_include_directories(duelo_magos PRIVATE src)

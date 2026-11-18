@@ -17,4 +17,6 @@ bool Camera::read(cv::Mat& out) {
     return true;
 }
 
-void Camera::close() { cap_.release(); }
+void Camera::close() {
+    cap_.release();
+}

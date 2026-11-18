@@ -38,7 +38,6 @@ Câmera → Rastreamento da varinha → Trajetória → Segmentação do gesto
 
 | Forma | Feitiço | Efeito |
 |---|---|---|
-| Quadrado | Bola de Fogo | Projétil médio, dano médio |
 | Triângulo | Lança de Gelo | Projétil rápido, dano baixo, retarda o alvo |
 | Círuclo | Escudo | Bloqueia o próximo projétil |
 | Raio (zigue-zague) | Relâmpago | Projétil muito rápido, dano alto, custo alto de mana |
