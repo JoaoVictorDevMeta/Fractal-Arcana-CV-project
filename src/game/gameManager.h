@@ -1,7 +1,5 @@
+/ a classe gerenciadora como no projeto passado
 
-
-//a classe gerenciadora como no projeto passado
-
-class GameManager{
-
+    class GameManager
+{
 };
