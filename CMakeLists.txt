@@ -29,3 +29,9 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/tests/test_wand_blue.cpp)
   target_link_libraries(test_wand_blue PRIVATE ${OpenCV_LIBS})
   add_test(NAME wand_blue_selftest COMMAND test_wand_blue --selftest)
 endif()
+
+# --- Assets ----------------------------------------------------------------
+
+add_custom_command(TARGET duelo_magos POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:duelo_magos>/assets)
