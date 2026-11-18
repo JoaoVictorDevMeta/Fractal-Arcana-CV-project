@@ -29,3 +29,13 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/tests/test_wand_blue.cpp)
   target_link_libraries(test_wand_blue PRIVATE ${OpenCV_LIBS})
   add_test(NAME wand_blue_selftest COMMAND test_wand_blue --selftest)
 endif()
+
+if(EXISTS ${CMAKE_SOURCE_DIR}/tests/teste_classificador.cpp)
+  add_executable(teste_classificador
+    tests/teste_classificador.cpp
+    src/gesture/shape_classif.cpp
+    src/gesture/formalizer.cpp
+  )
+  target_include_directories(teste_classificador PRIVATE src)
+  target_link_libraries(teste_classificador PRIVATE ${OpenCV_LIBS})
+endif()
