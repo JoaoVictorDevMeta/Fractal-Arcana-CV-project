@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include "render/hud.h"
+#include "render/sprites.h"
 #include "game/match.h"
 
 int main(int argc, char **argv)
@@ -45,6 +46,10 @@ int main(int argc, char **argv)
     cv::Mat frame, mask, gray, inkMask;
     double fps = 0;
     int64 tPrev = cv::getTickCount();
+
+    Assets assets;
+    if (!assets.load("assets"))
+        std::printf("Sprites nao encontrados, usando formas simples\n");
 
     Match match;
 
@@ -92,8 +97,11 @@ int main(int argc, char **argv)
         if (k == 'p' || k == 'P')
             pen.penDown = !pen.penDown;
 
-        match.update(dt);          // logica
-        drawGame(gameView, match); // desenha na janela do jogo
+        if (k >= '1' && k <= '6')
+            match.cast(0, static_cast<Shape>(k - '1'));
+
+        match.update(dt);                  // logica
+        drawGame(gameView, match, assets); // desenha na janela do jogo
 
         cv::imshow(camWin, frame);     // debug da camera
         cv::imshow(gameWin, gameView); // jogo
