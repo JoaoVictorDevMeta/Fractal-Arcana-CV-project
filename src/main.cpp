@@ -5,6 +5,7 @@
 #include "render/hud.h"
 #include "render/sprites.h"
 #include "game/match.h"
+#include "vision/split_screen.h"
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <cstdio>
@@ -26,7 +27,9 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "Erro: nao abriu a camera %d\n", camIdx);
         return 2;
     }
+    std::printf("Camera %d aberta. ESC sair | C limpar | P caneta | D mascaras | R reiniciar | 1-5 feitico P1\n", camIdx);
 
+    // --- janelas ---
     const char *camWin = "Camera";
     const char *gameWin = "Duelo";
     cv::namedWindow(camWin);
@@ -35,27 +38,41 @@ int main(int argc, char **argv)
     cv::moveWindow(gameWin, 700, 0);
     cv::Mat gameView(720, 1280, CV_8UC3);
 
-    // --- visao / gestos ---
-    WandDetector det;
-    AirPen pen;
+    // --- visao: tela dividida (2 detectores, 2 Kalman, 2 canetas) ---
+    SplitScreen game;
+    // Padroes: P1 azul (padrao do HsvRange), P2 verde.
+    game.detector[1].range = HsvRange{40, 85, 100, 255, 100, 255};
+
+    if (loadRange("config/vision_p1.yaml", game.detector[0].range) ||
+        loadRange("config/vision.yaml", game.detector[0].range))
+        std::printf("P1: faixa HSV carregada\n");
+    else
+        std::printf("P1: faixa HSV padrao (azul)\n");
+
+    if (loadRange("config/vision_p2.yaml", game.detector[1].range))
+        std::printf("P2: faixa HSV carregada\n");
+    else
+        std::printf("P2: faixa HSV padrao (verde)\n");
+
+    // --- gestos (um resultado/cooldown por jogador) ---
     ShapeClassifier classifier;
-    ShapeResult lastResult;
+    ShapeResult lastResult[2];
     const float cooldownMs = 400.0f;
-    int64 lastClassifyTime = 0;
+    int64 lastClassifyTime[2] = {0, 0};
 
     // --- jogo ---
     Assets assets;
     if (!assets.load("assets"))
         std::printf("Sprites nao encontrados, usando formas simples\n");
     Match match;
-    float botTimer = 2.f;
 
     std::ofstream logPen("log_pen.csv");
-    logPen << "Timestamp_ms,Found,X,Y\n";
+    logPen << "Timestamp_ms,Player,Found,X,Y\n";
     std::ofstream logShape("log_shape.csv");
-    logShape << "Timestamp_ms,Tempo_Classificacao_ms,Shape_ID,Confianca,DebugText\n";
+    logShape << "Timestamp_ms,Player,Tempo_Classificacao_ms,Shape_ID,Confianca,DebugText\n";
 
-    cv::Mat frame, mask, gray, inkMask;
+    bool debug = false, penDown = true;
+    cv::Mat frame;
     double fps = 0;
     int64 tPrev = cv::getTickCount();
 
@@ -66,113 +83,125 @@ int main(int argc, char **argv)
             std::fprintf(stderr, "Falha no read\n");
             break;
         }
-        if (pen.canvas.size() != frame.size())
-            pen.reset(frame.size());
 
-        // dt do frame
-        int64 t = cv::getTickCount();
-        double dt = (t - tPrev) / cv::getTickFrequency();
+        const int64 t = cv::getTickCount();
+        const double dt = (t - tPrev) / cv::getTickFrequency();
         tPrev = t;
         if (dt > 0)
             fps = (fps == 0) ? 1.0 / dt : 0.9 * fps + 0.1 / dt;
+        const double currentTimeMs = t * 1000.0 / cv::getTickFrequency();
 
-        Detection d = det.detect(frame, &mask);
-        pen.update(d);
+        // deteccao + Kalman + tinta dos dois jogadores
+        game.update(frame, double(t) / cv::getTickFrequency());
 
-        double currentTimeMs = t * 1000.0 / cv::getTickFrequency();
-        logPen << currentTimeMs << "," << (d.found ? 1 : 0) << ","
-               << d.center.x << "," << d.center.y << "\n";
-
-        // --- CLASSIFICACAO ---
-        float timeSinceLastClassify = (t - lastClassifyTime) * 1000.0f / cv::getTickFrequency();
-
-        if (pen.hasFinishedStroke() && timeSinceLastClassify > cooldownMs)
+        // --- CLASSIFICACAO (por jogador) ---
+        float sinceMs[2];
+        for (int p = 0; p < 2; ++p)
         {
-            std::vector<cv::Point2f> pts = pen.getStroke();
+            const Detection &d = game.player(p).det;
+            logPen << currentTimeMs << "," << p << "," << (d.found ? 1 : 0) << ","
+                   << d.center.x << "," << d.center.y << "\n";
 
-            if (pts.size() > 10)
+            AirPen &pen = game.pen[p];
+            sinceMs[p] = (t - lastClassifyTime[p]) * 1000.0f / cv::getTickFrequency();
+
+            if (pen.hasFinishedStroke() && sinceMs[p] > cooldownMs)
             {
-                int64 c0 = cv::getTickCount();
-                lastResult = classifier.classify(pts);
-                double classifyTimeMs = (cv::getTickCount() - c0) * 1000.0 / cv::getTickFrequency();
+                std::vector<cv::Point2f> pts = pen.getStroke();
 
-                logShape << currentTimeMs << "," << classifyTimeMs << ","
-                         << (int)lastResult.shape << "," << lastResult.confidence << ","
-                         << "\"" << lastResult.resultText << "\"\n";
+                if (pts.size() > 10)
+                {
+                    int64 c0 = cv::getTickCount();
+                    lastResult[p] = classifier.classify(pts);
+                    double classifyTimeMs = (cv::getTickCount() - c0) * 1000.0 / cv::getTickFrequency();
 
-                if (lastResult.shape == Shape::Nenhum)
-                    lastResult.resultText = "ERRO: Forma nao reconhecida!";
-                else
-                    match.cast(0, lastResult.shape); // <<< LIGACAO: forma reconhecida lanca o feitico
+                    logShape << currentTimeMs << "," << p << "," << classifyTimeMs << ","
+                             << (int)lastResult[p].shape << "," << lastResult[p].confidence << ","
+                             << "\"" << lastResult[p].resultText << "\"\n";
+
+                    if (lastResult[p].shape == Shape::Nenhum)
+                        lastResult[p].resultText = "ERRO: Forma nao reconhecida!";
+                    else
+                        match.cast(p, lastResult[p].shape); // forma reconhecida lanca o feitico
+                }
+
+                pen.reset(pen.canvas.size());
+                pen.resetStroke();
+                lastClassifyTime[p] = t;
             }
-
-            pen.reset(pen.canvas.size());
-            pen.resetStroke();
-            lastClassifyTime = t;
         }
 
         // --- CAMERA (debug) ---
-        cv::cvtColor(pen.canvas, gray, cv::COLOR_BGR2GRAY);
-        cv::threshold(gray, inkMask, 0, 255, cv::THRESH_BINARY);
-        pen.canvas.copyTo(frame, inkMask);
-        pen.renderAssistant(frame);
-
-        if (d.found)
-        {
-            cv::rectangle(frame, d.bbox, {0, 255, 0}, 2);
-            cv::circle(frame, cv::Point(d.center), 6, {0, 0, 255}, -1);
-        }
+        game.draw(frame); // tinta, divisoria, marcadores
 
         char fpsText[64];
         std::snprintf(fpsText, sizeof(fpsText), "FPS %.0f", fps);
-        cv::putText(frame, fpsText, {10, 30}, cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
+        cv::putText(frame, fpsText, {10, frame.rows - 12}, cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                    cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
 
-        if (lastResult.shape != Shape::Nenhum)
+        // HUD por jogador (x muda conforme a metade da tela)
+        for (int p = 0; p < 2; ++p)
         {
-            char resText[160];
-            std::snprintf(resText, sizeof(resText), "MAGIA: %s (Confianca: %.2f)",
-                          spellFor(lastResult.shape).name.c_str(), lastResult.confidence);
-            cv::putText(frame, resText, {10, 70}, cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2);
-            cv::putText(frame, lastResult.resultText, {10, 100}, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(200, 200, 200), 1);
-        }
-        else if (!lastResult.resultText.empty())
-        {
-            cv::putText(frame, lastResult.resultText, {10, 70}, cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
-        }
+            const int x = game.zone(p).x + 10;
+            const ShapeResult &r = lastResult[p];
 
-        if (timeSinceLastClassify < cooldownMs)
-        {
-            float pct = 1.0f - (timeSinceLastClassify / cooldownMs);
-            cv::putText(frame, "Aguarde...", {10, 130}, cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(150, 150, 150), 2);
-            cv::rectangle(frame, cv::Rect(10, 140, (int)(200 * pct), 10), cv::Scalar(150, 150, 150), -1);
-        }
+            if (r.shape != Shape::Nenhum)
+            {
+                char resText[160];
+                std::snprintf(resText, sizeof(resText), "MAGIA: %s (%.2f)",
+                              spellFor(r.shape).name.c_str(), r.confidence);
+                cv::putText(frame, resText, {x, 70}, cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                            cv::Scalar(0, 255, 255), 2);
+                cv::putText(frame, r.resultText, {x, 100}, cv::FONT_HERSHEY_SIMPLEX, 0.5,
+                            cv::Scalar(200, 200, 200), 1);
+            }
+            else if (!r.resultText.empty())
+            {
+                cv::putText(frame, r.resultText, {x, 70}, cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                            cv::Scalar(0, 0, 255), 2);
+            }
 
-        // botTimer -= static_cast<float>(dt);
-        // if (botTimer <= 0.f)
-        // {
-        //     match.cast(1, static_cast<Shape>(std::rand() % 5)); // 5 feiticos
-        //     botTimer = 1.5f + (std::rand() % 20) / 10.f;
-        // }
+            if (sinceMs[p] < cooldownMs)
+            {
+                float pct = 1.0f - (sinceMs[p] / cooldownMs);
+                cv::putText(frame, "Aguarde...", {x, 130}, cv::FONT_HERSHEY_SIMPLEX, 0.6,
+                            cv::Scalar(150, 150, 150), 2);
+                cv::rectangle(frame, cv::Rect(x, 140, (int)(200 * pct), 10),
+                              cv::Scalar(150, 150, 150), -1);
+            }
+        }
 
         match.update(dt);
         drawGame(gameView, match, assets);
 
         cv::imshow(camWin, frame);
         cv::imshow(gameWin, gameView);
+        if (debug)
+            cv::imshow("Mascaras", game.combinedMask());
 
         // --- TECLAS (um unico waitKey) ---
-        int k = cv::waitKey(1);
+        const int k = cv::waitKey(1);
         if (k == 27)
             break;
         if (k == 'c' || k == 'C')
         {
-            pen.reset(pen.canvas.size());
-            pen.resetStroke();
-            lastResult = ShapeResult();
+            game.clearPens();
+            lastResult[0] = lastResult[1] = ShapeResult();
+        }
+        if (k == 'p' || k == 'P')
+        {
+            penDown = !penDown;
+            game.setPenDown(penDown);
+        }
+        if (k == 'd' || k == 'D')
+        {
+            debug = !debug;
+            if (!debug)
+                cv::destroyWindow("Mascaras");
         }
         if (k == 'r' || k == 'R')
             match.reset();
-        // teclado simula o classificador: 1=Linha 2=Raio 3=Circulo 4=Triangulo 5=Estrela
+        // teclado simula o classificador (P1): 1=Linha 2=Raio 3=Circulo 4=Triangulo 5=Estrela
         if (k >= '1' && k <= '5')
             match.cast(0, static_cast<Shape>(k - '1'));
     }
