@@ -35,10 +35,10 @@ constexpr float kManaRegenPerS = 8.f;   // mana por segundo
 constexpr float kGlobalCooldown = 0.5f; // entre feiticos
 
 constexpr std::size_t kShapeCount = static_cast<std::size_t>(Shape::Nenhum) + 1;
-static_assert(static_cast<std::size_t>(Shape::Nenhum) == 6,
+static_assert(static_cast<std::size_t>(Shape::Nenhum) == 5,
               "Shape::Nenhum deve ser o ultimo; atualize spellTable()");
 
-// A ORDEM segue o enum Shape: Linha, Raio, Circulo, Quadrado, Triangulo, Estrela, Nenhum.
+// A ORDEM segue o enum Shape: Linha, Raio, Circulo, Triangulo, Estrela, Nenhum.
 inline std::array<SpellDef, kShapeCount> &spellTable()
 {
     static std::array<SpellDef, kShapeCount> table = {{
@@ -46,8 +46,7 @@ inline std::array<SpellDef, kShapeCount> &spellTable()
         {"Bola de fogo", SpellType::AtaqueFraco, 8.f, 6.f, 1.6f, 0.f, 0},          // Linha
         {"Relampago", SpellType::AtaqueMedio, 30.f, 14.f, 1.3f, 0.f, 0},           // Raio
         {"Escudo", SpellType::Escudo, 20.f, 0.f, 0.f, 4.f, 1},                     // Circulo
-        {"Chuva de pedras", SpellType::AtaqueForte, 45.f, 24.f, 2.4f, 0.f, 0},     // Quadrado
-        {"Lanca de Gelo", SpellType::AtaqueMedio, 22.f, 10.f, 1.8f, 0.f, 0},       // Triangulo
+        {"Chuva de pedras", SpellType::AtaqueForte, 45.f, 24.f, 2.4f, 0.f, 0},     // Triangulo
         {"Explosao de Mana", SpellType::AtaqueEspecial, 80.f, 40.f, 1.5f, 0.f, 0}, // Estrela
         {}                                                                         // Nenhum
     }};

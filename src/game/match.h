@@ -26,9 +26,8 @@ enum class MatchState
     Player0Won,
     Player1Won
 };
-1
 
-    class Match
+class Match
 {
 public:
     void update(double dt);

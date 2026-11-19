@@ -51,7 +51,7 @@ std::vector<cv::Point2f> FeatureExtractor::equiDistPts(std::vector<cv::Point2f> 
     return out;
 }
 
-std::vector<cv::Point2f> FeatureExtractor::FeatureExtractor::normalize(const std::vector<cv::Point2f> &pts)
+std::vector<cv::Point2f> FeatureExtractor::normalize(std::vector<cv::Point2f> &pts)
 {
     if (pts.empty())
         return {};
