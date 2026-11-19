@@ -36,3 +36,7 @@ Thumbs.db
 *.avi
 *.mp4
 *.mkv
+
+# logs
+
+log*
