@@ -38,7 +38,6 @@ Câmera → Rastreamento da varinha → Trajetória → Segmentação do gesto
 
 | Forma | Feitiço | Efeito |
 |---|---|---|
-| Quadrado | Bola de Fogo | Projétil médio, dano médio |
 | Triângulo | Lança de Gelo | Projétil rápido, dano baixo, retarda o alvo |
 | Círuclo | Escudo | Bloqueia o próximo projétil |
 | Raio (zigue-zague) | Relâmpago | Projétil muito rápido, dano alto, custo alto de mana |
@@ -170,9 +169,9 @@ Detalhes completos estão no documento de especificação do projeto.
 
 ## Roadmap
 
-- [ ] M1: captura e rastreamento de uma varinha com calibração
+- [+-] M1: captura e rastreamento de uma varinha com calibração
 - [ ] M2: duas varinhas, ROI por jogador, filtro de Kalman
-- [ ] M3: segmentação de gestos e classificador de formas básicas
+- [x] M3: segmentação de gestos e classificador de formas básicas
 - [ ] M4: raio, reforço por template e matriz de confusão
 - [ ] M5: lógica de jogo (vida, mana, projéteis, colisão, escudo)
 - [ ] M6: renderização completa (sprites, HUD, menus)
