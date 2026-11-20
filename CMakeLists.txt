@@ -39,3 +39,9 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/tests/teste_classificador.cpp)
   target_include_directories(teste_classificador PRIVATE src)
   target_link_libraries(teste_classificador PRIVATE ${OpenCV_LIBS})
 endif()
+
+# --- Assets ----------------------------------------------------------------
+
+add_custom_command(TARGET duelo_magos POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:duelo_magos>/assets)
