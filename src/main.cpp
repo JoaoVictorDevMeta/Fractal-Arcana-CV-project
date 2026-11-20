@@ -6,6 +6,7 @@
 #include "render/sprites.h"
 #include "game/match.h"
 #include "vision/split_screen.h"
+#include "ui/menu_ui.h"
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <cstdio>
@@ -14,8 +15,18 @@
 #include <fstream>
 #include <string>
 
-int main(int argc, char **argv)
-{
+struct MouseCtx {
+    MenuUI* ui = nullptr;
+    cv::Size size{1280, 720};
+};
+
+static void onMouse(int event, int x, int y, int, void* userdata) {
+    if (event != cv::EVENT_LBUTTONDOWN) return;
+    auto* ctx = static_cast<MouseCtx*>(userdata);
+    if (ctx && ctx->ui) ctx->ui->onMouseClick(x, y, ctx->size);
+}
+
+int main(int argc, char** argv) {
     int camIdx = 0;
     for (int i = 1; i < argc; ++i)
         if (!std::strcmp(argv[i], "--camera") && i + 1 < argc)
@@ -27,117 +38,49 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "Erro: nao abriu a camera %d\n", camIdx);
         return 2;
     }
-    std::printf("Camera %d aberta. ESC sair | C limpar | P caneta | D mascaras | R reiniciar | 1-5 feitico P1\n", camIdx);
 
-    // --- janelas ---
-    const char *camWin = "Camera";
-    const char *gameWin = "Duelo";
-    cv::namedWindow(camWin);
-    cv::namedWindow(gameWin, cv::WINDOW_AUTOSIZE);
-    cv::moveWindow(camWin, 0, 0);
-    cv::moveWindow(gameWin, 700, 0);
-    cv::Mat gameView(720, 1280, CV_8UC3);
-
-    // --- visao: tela dividida (2 detectores, 2 Kalman, 2 canetas) ---
     SplitScreen game;
-    // Padroes: P1 azul (padrao do HsvRange), P2 verde.
     game.detector[1].range = HsvRange{40, 85, 100, 255, 100, 255};
+    if (!loadRange("config/vision_p1.yaml", game.detector[0].range))
+        loadRange("config/vision.yaml", game.detector[0].range);
+    loadRange("config/vision_p2.yaml", game.detector[1].range);
 
-    if (loadRange("config/vision_p1.yaml", game.detector[0].range) ||
-        loadRange("config/vision.yaml", game.detector[0].range))
-        std::printf("P1: faixa HSV carregada\n");
-    else
-        std::printf("P1: faixa HSV padrao (azul)\n");
+    MenuUI menu;
+    menu.loadCharacters("assets");
 
-    if (loadRange("config/vision_p2.yaml", game.detector[1].range))
-        std::printf("P2: faixa HSV carregada\n");
-    else
-        std::printf("P2: faixa HSV padrao (verde)\n");
+    const char* win = "Fractal Arcana";
+    cv::namedWindow(win);
+    MouseCtx mouseCtx{&menu, {1280, 720}};
+    cv::setMouseCallback(win, onMouse, &mouseCtx);
 
-    // --- gestos (um resultado/cooldown por jogador) ---
-    ShapeClassifier classifier;
-    ShapeResult lastResult[2];
-    const float cooldownMs = 400.0f;
-    int64 lastClassifyTime[2] = {0, 0};
-
-    // --- jogo ---
-    Assets assets;
-    if (!assets.load("assets"))
-        std::printf("Sprites nao encontrados, usando formas simples\n");
-    Match match;
-
-    std::ofstream logPen("log_pen.csv");
-    logPen << "Timestamp_ms,Player,Found,X,Y\n";
-    std::ofstream logShape("log_shape.csv");
-    logShape << "Timestamp_ms,Player,Tempo_Classificacao_ms,Shape_ID,Confianca,DebugText\n";
-
-    bool debug = false, penDown = true;
+    bool debug = false;
     cv::Mat frame;
-    double fps = 0;
     int64 tPrev = cv::getTickCount();
 
-    for (;;)
-    {
-        if (!cam.read(frame))
-        {
-            std::fprintf(stderr, "Falha no read\n");
-            break;
-        }
+    for (;;) {
+        if (!cam.read(frame)) break;
+        mouseCtx.size = frame.size();
 
         const int64 t = cv::getTickCount();
         const double dt = (t - tPrev) / cv::getTickFrequency();
         tPrev = t;
-        if (dt > 0)
-            fps = (fps == 0) ? 1.0 / dt : 0.9 * fps + 0.1 / dt;
-        const double currentTimeMs = t * 1000.0 / cv::getTickFrequency();
+        const double nowSec = double(t) / cv::getTickFrequency();
 
-        // deteccao + Kalman + tinta dos dois jogadores
-        game.update(frame, double(t) / cv::getTickFrequency());
+        // Atualiza deteccao/Kalman das duas varinhas
+        game.update(frame, nowSec);
+        Tracked t1 = game.player(0).trk;
+        Tracked t2 = game.player(1).trk;
 
-        // --- CLASSIFICACAO (por jogador) ---
-        float sinceMs[2];
-        for (int p = 0; p < 2; ++p)
-        {
-            const Detection &d = game.player(p).det;
-            logPen << currentTimeMs << "," << p << "," << (d.found ? 1 : 0) << ","
-                   << d.center.x << "," << d.center.y << "\n";
-
-            AirPen &pen = game.pen[p];
-            sinceMs[p] = (t - lastClassifyTime[p]) * 1000.0f / cv::getTickFrequency();
-
-            if (pen.hasFinishedStroke() && sinceMs[p] > cooldownMs)
-            {
-                std::vector<cv::Point2f> pts = pen.getStroke();
-
-                if (pts.size() > 10)
-                {
-                    int64 c0 = cv::getTickCount();
-                    lastResult[p] = classifier.classify(pts);
-                    double classifyTimeMs = (cv::getTickCount() - c0) * 1000.0 / cv::getTickFrequency();
-
-                    logShape << currentTimeMs << "," << p << "," << classifyTimeMs << ","
-                             << (int)lastResult[p].shape << "," << lastResult[p].confidence << ","
-                             << "\"" << lastResult[p].resultText << "\"\n";
-
-                    if (lastResult[p].shape == Shape::Nenhum)
-                        lastResult[p].resultText = "ERRO: Forma nao reconhecida!";
-                    else
-                        match.cast(p, lastResult[p].shape); // forma reconhecida lanca o feitico
-                }
-
-                pen.reset(pen.canvas.size());
-                pen.resetStroke();
-                lastClassifyTime[p] = t;
-            }
+        if (menu.screen() == GameScreen::DuelReady) {
+            game.draw(frame);
+        } else {
+            menu.update(frame.size(), t1, t2, dt);
+            menu.draw(frame);
         }
 
-        // --- CAMERA (debug) ---
-        game.draw(frame); // tinta, divisoria, marcadores
-
-        char fpsText[64];
-        std::snprintf(fpsText, sizeof(fpsText), "FPS %.0f", fps);
-        cv::putText(frame, fpsText, {10, frame.rows - 12}, cv::FONT_HERSHEY_SIMPLEX, 0.6,
-                    cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+        // Marcadores visuais das varinhas P1 e P2
+        if (t1.valid) cv::circle(frame, {cvRound(t1.pos.x), cvRound(t1.pos.y)}, 8, {255, 140, 20}, -1, cv::LINE_AA);
+        if (t2.valid) cv::circle(frame, {cvRound(t2.pos.x), cvRound(t2.pos.y)}, 8, {60, 255, 80}, -1, cv::LINE_AA);
 
         // HUD por jogador (x muda conforme a metade da tela)
         for (int p = 0; p < 2; ++p)
@@ -181,20 +124,10 @@ int main(int argc, char **argv)
 
         // --- TECLAS (um unico waitKey) ---
         const int k = cv::waitKey(1);
-        if (k == 27)
-            break;
-        if (k == 'c' || k == 'C')
-        {
-            game.clearPens();
-            lastResult[0] = lastResult[1] = ShapeResult();
-        }
-        if (k == 'p' || k == 'P')
-        {
-            penDown = !penDown;
-            game.setPenDown(penDown);
-        }
-        if (k == 'd' || k == 'D')
-        {
+        if (k == 27) break;
+        if (k == 'r' || k == 'R') menu.resetSelection();
+        if (k == 'm' || k == 'M') menu.setScreen(GameScreen::Title);
+        if (k == 'd' || k == 'D') {
             debug = !debug;
             if (!debug)
                 cv::destroyWindow("Mascaras");
@@ -206,8 +139,6 @@ int main(int argc, char **argv)
             match.cast(0, static_cast<Shape>(k - '1'));
     }
 
-    logPen.close();
-    logShape.close();
     cam.close();
     return 0;
 }
