@@ -1,10 +1,22 @@
 #include "vision/camera.h"
 #include "vision/split_screen.h"
+#include "ui/menu_ui.h"
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+struct MouseCtx {
+    MenuUI* ui = nullptr;
+    cv::Size size{1280, 720};
+};
+
+static void onMouse(int event, int x, int y, int, void* userdata) {
+    if (event != cv::EVENT_LBUTTONDOWN) return;
+    auto* ctx = static_cast<MouseCtx*>(userdata);
+    if (ctx && ctx->ui) ctx->ui->onMouseClick(x, y, ctx->size);
+}
 
 int main(int argc, char** argv) {
     int camIdx = 0;
@@ -17,61 +29,63 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "Erro: nao abriu a camera %d\n", camIdx);
         return 2;
     }
-    std::printf("Camera %d aberta. ESC sair | C limpar | P caneta | D mascaras\n", camIdx);
 
     SplitScreen game;
-
-    // Padroes: P1 azul (padrao do HsvRange), P2 verde.
     game.detector[1].range = HsvRange{40, 85, 100, 255, 100, 255};
+    if (!loadRange("config/vision_p1.yaml", game.detector[0].range))
+        loadRange("config/vision.yaml", game.detector[0].range);
+    loadRange("config/vision_p2.yaml", game.detector[1].range);
 
-    // P1 tenta vision_p1.yaml e, se nao existir, o antigo vision.yaml.
-    if (loadRange("config/vision_p1.yaml", game.detector[0].range) ||
-        loadRange("config/vision.yaml",    game.detector[0].range))
-        std::printf("P1: faixa HSV carregada\n");
-    else
-        std::printf("P1: faixa HSV padrao (azul)\n");
+    MenuUI menu;
+    menu.loadCharacters("assets");
 
-    if (loadRange("config/vision_p2.yaml", game.detector[1].range))
-        std::printf("P2: faixa HSV carregada\n");
-    else
-        std::printf("P2: faixa HSV padrao (verde)\n");
-
-    const char* win = "Duelo - webcam";
+    const char* win = "Fractal Arcana";
     cv::namedWindow(win);
+    MouseCtx mouseCtx{&menu, {1280, 720}};
+    cv::setMouseCallback(win, onMouse, &mouseCtx);
 
-    bool debug = false, penDown = true;
+    bool debug = false;
     cv::Mat frame;
-    double fps = 0;
     int64 tPrev = cv::getTickCount();
 
     for (;;) {
-        if (!cam.read(frame)) { std::fprintf(stderr, "Falha no read\n"); break; }
+        if (!cam.read(frame)) break;
+        mouseCtx.size = frame.size();
 
         const int64 t = cv::getTickCount();
         const double dt = (t - tPrev) / cv::getTickFrequency();
         tPrev = t;
-        if (dt > 0) fps = (fps == 0) ? 1.0 / dt : 0.9 * fps + 0.1 / dt;
+        const double nowSec = double(t) / cv::getTickFrequency();
 
-        game.update(frame, double(t) / cv::getTickFrequency());
-        game.draw(frame);
+        // Atualiza deteccao/Kalman das duas varinhas
+        game.update(frame, nowSec);
+        Tracked t1 = game.player(0).trk;
+        Tracked t2 = game.player(1).trk;
 
-        char line[64];
-        std::snprintf(line, sizeof(line), "FPS %.0f", fps);
-        cv::putText(frame, line, {10, frame.rows - 12}, cv::FONT_HERSHEY_SIMPLEX, 0.6,
-                    {255, 255, 255}, 2, cv::LINE_AA);
+        if (menu.screen() == GameScreen::DuelReady) {
+            game.draw(frame);
+        } else {
+            menu.update(frame.size(), t1, t2, dt);
+            menu.draw(frame);
+        }
+
+        // Marcadores visuais das varinhas P1 e P2
+        if (t1.valid) cv::circle(frame, {cvRound(t1.pos.x), cvRound(t1.pos.y)}, 8, {255, 140, 20}, -1, cv::LINE_AA);
+        if (t2.valid) cv::circle(frame, {cvRound(t2.pos.x), cvRound(t2.pos.y)}, 8, {60, 255, 80}, -1, cv::LINE_AA);
 
         cv::imshow(win, frame);
         if (debug) cv::imshow("Mascaras", game.combinedMask());
 
         const int k = cv::waitKey(1);
         if (k == 27) break;
-        if (k == 'c' || k == 'C') game.clearPens();
-        if (k == 'p' || k == 'P') { penDown = !penDown; game.setPenDown(penDown); }
+        if (k == 'r' || k == 'R') menu.resetSelection();
+        if (k == 'm' || k == 'M') menu.setScreen(GameScreen::Title);
         if (k == 'd' || k == 'D') {
             debug = !debug;
             if (!debug) cv::destroyWindow("Mascaras");
         }
     }
+
     cam.close();
     return 0;
 }
