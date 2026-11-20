@@ -11,10 +11,10 @@ struct Detection {
 };
 
 class WandDetector {
+private:
+    cv::Mat kernel_ = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
 public:
     HsvRange range;
     double minArea = 30.0;
-    Detection detect(const cv::Mat& bgr, cv::Mat* maskOut = nullptr) const;
-private:
-    cv::Mat kernel_ = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5,5));
+    Detection detect(cv::Mat& bgr, cv::Mat* maskOut = nullptr);
 };

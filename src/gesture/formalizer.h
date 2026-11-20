@@ -2,6 +2,18 @@
 #include "gesture/shapes.h"
 #include <vector>
 
-std::vector<cv::Point2f> resample(const std::vector<cv::Point2f>& pts, int n = 64);
+class FeatureExtractor {
+private:
+    double calculateCircularity(double area, double perimeter);
+    float calculateCornerMass(std::vector<cv::Point2f>& pts, bool closed);
+    float calculateRadialRatio(std::vector<cv::Point2f>& pts);
+    float calculateAspectRatio(std::vector<cv::Point2f>& pts);
+    float calculateWindingAngleDeg(std::vector<cv::Point2f>& pts);
+    int countZigZagTurns(std::vector<cv::Point2f>& poly);
 
-std::vector<cv::Point2f> normalize(const std::vector<cv::Point2f>& pts);
+public:
+    static std::vector<cv::Point2f> equiDistPts(std::vector<cv::Point2f>& pts, int n = 64);
+    static std::vector<cv::Point2f> normalize(std::vector<cv::Point2f>& pts);
+
+    ShapeFeatures extract(std::vector<cv::Point2f>& pts);
+};
