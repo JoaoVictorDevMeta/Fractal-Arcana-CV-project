@@ -60,12 +60,12 @@ void SplitScreen::update(const cv::Mat &frame, double t)
 
 void SplitScreen::draw(cv::Mat &f) const
 {
-    cv::Mat gray, ink;
     for (int i = 0; i < 2; ++i)
     {
-        cv::cvtColor(pen[i].canvas, gray, cv::COLOR_BGR2GRAY);
-        cv::threshold(gray, ink, 0, 255, cv::THRESH_BINARY);
-        pen[i].canvas.copyTo(f, ink);
+        // Reutiliza buffers para evitar alocacoes por frame
+        cv::cvtColor(pen[i].canvas, drawGray_, cv::COLOR_BGR2GRAY);
+        cv::threshold(drawGray_, drawInk_, 0, 255, cv::THRESH_BINARY);
+        pen[i].canvas(zone_[i]).copyTo(f(zone_[i]), drawInk_(zone_[i]));
     }
 
     const int mid = zone_[1].x;

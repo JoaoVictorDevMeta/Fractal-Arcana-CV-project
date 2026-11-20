@@ -37,4 +37,7 @@ private:
     std::array<cv::Rect,    2> zone_;
     std::array<cv::Mat,     2> mask_;
     std::array<PlayerView,  2> view_;
+    // Buffers reutilizaveis para draw() — evita alocacoes a cada frame
+    mutable cv::Mat drawGray_;
+    mutable cv::Mat drawInk_;
 };

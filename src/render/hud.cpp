@@ -1,33 +1,26 @@
 #include "render/hud.h"
 #include "render/sprites.h"
 #include "game/match.h"
-#include <algorithm>
 #include <opencv2/imgproc.hpp>
-
-static void drawBar(cv::Mat &v, cv::Rect r, float frac, cv::Scalar color)
-{
-    cv::rectangle(v, r, {60, 60, 60}, cv::FILLED);
-    cv::Rect fill = r;
-    fill.width = int(r.width * std::clamp(frac, 0.f, 1.f));
-    cv::rectangle(v, fill, color, cv::FILLED);
-    cv::rectangle(v, r, {255, 255, 255}, 1);
-}
 
 void drawGame(cv::Mat &view, const Match &m, const Assets &as)
 {
     if (!as.background.empty())
-        as.background.copyTo(view);
+    {
+        if (as.background.size() == view.size())
+            as.background.copyTo(view);
+        else
+        {
+            cv::Mat background;
+            cv::resize(as.background, background, view.size());
+            background.copyTo(view);
+        }
+    }
     else
         view.setTo(cv::Scalar(30, 20, 20));
 
     const int W = view.cols, H = view.rows;
     const int xs[2] = {160, W - 160};
-
-    // barras: jogador 0 a esquerda, jogador 1 a direita
-    drawBar(view, {20, 20, 300, 20}, m.health01(0), {60, 60, 230});
-    drawBar(view, {20, 48, 300, 14}, m.mana01(0), {230, 140, 40});
-    drawBar(view, {W - 320, 20, 300, 20}, m.health01(1), {60, 60, 230});
-    drawBar(view, {W - 320, 48, 300, 14}, m.mana01(1), {230, 140, 40});
 
     // magos e escudos
     for (int p = 0; p < 2; ++p)
@@ -54,7 +47,8 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as)
     {
         int x = xs[pr.owner] + int((xs[1 - pr.owner] - xs[pr.owner]) * pr.t);
 
-        const auto &anim = as.boltAnim[int(pr.type)];
+        const auto &anim = pr.owner == 1 ? as.boltAnimFlipped[int(pr.type)]
+                                         : as.boltAnim[int(pr.type)];
         const cv::Mat *spr = nullptr;
         if (!anim.empty())
         {
@@ -62,23 +56,19 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as)
             spr = &anim[f];
         }
         else
-            spr = &as.bolt[int(pr.type)];
+        {
+            spr = pr.owner == 1 ? &as.boltFlipped[int(pr.type)]
+                                : &as.bolt[int(pr.type)];
+        }
 
         if (!spr->empty())
         {
-            if (pr.owner == 1)
-            {
-                cv::Mat f;
-                cv::flip(*spr, f, 1);
-                drawSprite(view, f, {x, H / 2});
-            }
-            else
-                drawSprite(view, *spr, {x, H / 2});
+            drawSprite(view, *spr, {x, H / 2});
         }
         else
             cv::circle(view, {x, H / 2}, 10 + int(pr.damage / 3), {80, 80, 255}, cv::FILLED);
     }
     if (m.state() != MatchState::Running)
         cv::putText(view, m.state() == MatchState::Player0Won ? "JOGADOR 1 VENCEU" : "JOGADOR 2 VENCEU",
-                    {W / 2 - 200, H / 2 - 100}, cv::FONT_HERSHEY_SIMPLEX, 1.2, {255, 255, 255}, 3);
+                    {W / 2 - 200, H / 2 - 55}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {255, 255, 255}, 3);
 }

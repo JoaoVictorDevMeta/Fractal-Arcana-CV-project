@@ -1,4 +1,4 @@
-#include "ui/menu_ui.h"
+#include "game/menu_ui.h"
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
@@ -38,22 +38,35 @@ cv::Mat makeFallbackPortrait(int index, const std::string& name) {
 
 } // namespace
 
+// Tenta carregar imagem testando extensoes em ordem; retorna Mat vazia se nenhuma funcionar.
+static cv::Mat tryLoadImage(const std::string& basePath,
+                            const std::vector<std::string>& exts = {".png", ".jpeg", ".jpg"}) {
+    for (const auto& e : exts) {
+        cv::Mat m = cv::imread(basePath + e, cv::IMREAD_COLOR);
+        if (!m.empty()) return m;
+    }
+    return {};
+}
+
 MenuUI::MenuUI() {
+    // selectImage: imagem exibida no menu (xxx_select.{png,jpeg})
+    // playerImage: spritesheet usado no jogo (xxx_player.png)
     chars_ = {
-        {"derzu",      "Derzu Omaia",           "derzu_omaia.png"},
-        {"meneghetti", "Meneghetti, o Macom",   "meneghetti_macom.png"},
-        {"venegas",    "Venegas",               "venegas.png"},
-        {"neri",       "Neri",                  "neri.png"},
-        {"baltar",     "Baltar MST",            "baltar_mst.png"},
-        {"subramana",  "SubraMana",             "subramana.png"},
+        {"derzu",      "Derzu Omaia",         "derzu_select",      "derzu_player.png"},
+        {"meneghetti", "Meneghetti, o Macom", "menegueti_select",  "menegueti_player.png"},
+        {"venegas",    "Venegas",             "venegas_select",    "venegas_player.png"},
+        {"neri",       "Neri",                "neri-select",       "neri_player.png"},
+        {"baltar",     "Baltar MST",          "baltar_select",     "baltar_player.png"},
+        {"subramana",  "SubraMana",           "anand_select",      "anand_player.png"},
     };
 }
 
 bool MenuUI::loadCharacters(const std::string& assetsDir) {
     bool allOk = true;
     for (size_t i = 0; i < chars_.size(); ++i) {
-        std::string fullPath = assetsDir + "/" + chars_[i].imagePath;
-        cv::Mat img = cv::imread(fullPath, cv::IMREAD_COLOR);
+        // Tenta carregar a imagem de selecao (xxx_select) com extensoes .png e .jpeg
+        const std::string base = assetsDir + "/sprites/players/" + chars_[i].selectImage;
+        cv::Mat img = tryLoadImage(base);
         if (img.empty()) {
             allOk = false;
             chars_[i].portrait = makeFallbackPortrait(static_cast<int>(i), chars_[i].name);
@@ -62,6 +75,21 @@ bool MenuUI::loadCharacters(const std::string& assetsDir) {
         }
     }
     return allOk;
+}
+
+std::string MenuUI::characterImagePath(int idx) const {
+    if (idx < 0 || idx >= static_cast<int>(chars_.size())) return "";
+    return chars_[idx].selectImage;
+}
+
+std::string MenuUI::characterPlayerImage(int idx) const {
+    if (idx < 0 || idx >= static_cast<int>(chars_.size())) return "";
+    return chars_[idx].playerImage;
+}
+
+std::string MenuUI::characterId(int idx) const {
+    if (idx < 0 || idx >= static_cast<int>(chars_.size())) return "";
+    return chars_[idx].id;
 }
 
 void MenuUI::setScreen(GameScreen s) {
@@ -108,7 +136,7 @@ void MenuUI::drawMedievalBackground_(cv::Mat& bg) const {
         int blue  = cvRound((1.f - t) * 75.f + t * 28.f);
         int green = cvRound((1.f - t) * 42.f + t * 24.f);
         int red   = cvRound((1.f - t) * 32.f + t * 18.f);
-        cv::rectangle(bg, {0, b * bandH}, {w, (b + 1) * bandH + 1}, {blue, green, red}, cv::FILLED);
+        cv::rectangle(bg, {0, b * bandH}, {w, (b + 1) * bandH + 1}, cv::Scalar(blue, green, red), cv::FILLED);
     }
 
     // Estrelas / particulas arcanas pixeladas
@@ -406,8 +434,7 @@ void MenuUI::draw(cv::Mat& frame) const {
         const_cast<MenuUI*>(this)->ensureBackground_(frame.size());
     }
 
-    // Mescla o cenario medieval/magico com o video da camera para manter a deteccao visivel
-    cv::addWeighted(bgCache_, 0.68, frame, 0.32, 0.0, frame);
+    bgCache_.copyTo(frame);
 
     if (screen_ == GameScreen::Title) {
         drawTitleScreen_(frame);

@@ -16,11 +16,12 @@ enum class GameScreen {
 struct CharacterDef {
     std::string id;
     std::string name;
-    std::string imagePath;
-    cv::Mat portrait;       // carregada do disco ou gerada como fallback
-    cv::Rect cardRect;      // area na tela de selecao
+    std::string selectImage;  // xxx_select.{png,jpeg} — retrato no menu
+    std::string playerImage;  // xxx_player.png        — spritesheet no jogo
+    cv::Mat portrait;         // carregada do disco ou gerada como fallback
+    cv::Rect cardRect;        // area na tela de selecao
     float drawProgress[2] = {0.f, 0.f}; // progresso desenhado pela varinha de P1 e P2
-    cv::Mat drawLayer;      // tracos desenhados sobre o card
+    cv::Mat drawLayer;        // tracos desenhados sobre o card
 };
 
 class MenuUI {
@@ -50,6 +51,13 @@ public:
     int selectedP1() const { return chosen_[0]; }
     int selectedP2() const { return chosen_[1]; }
     std::string characterName(int idx) const;
+
+    // Retorna o nome do arquivo _select para uso externo (legado)
+    std::string characterImagePath(int idx) const;
+    // Retorna o nome do arquivo _player para carregar no jogo
+    std::string characterPlayerImage(int idx) const;
+    // Retorna o id curto do personagem (ex: "derzu", "baltar")
+    std::string characterId(int idx) const;
 
 private:
     void ensureBackground_(const cv::Size& size);

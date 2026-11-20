@@ -12,13 +12,26 @@ cv::Mat loadSprite(const std::string &path, int height = 0);
 void drawSprite(cv::Mat &dst, const cv::Mat &spr, cv::Point center);
 std::vector<cv::Mat> loadStrip(const std::string &path, int frameW, int height);
 
+// Carrega uma imagem de wizard como spritesheet (kWizardFrames frames) ou imagem unica.
+// Preenche 'out' (lado 0 = normal, lado 1 = espelhado). Retorna true se carregou algo.
+bool loadWizardFrames(const std::string &path, std::vector<cv::Mat> out[2]);
+
 struct Assets
 {
-    std::vector<cv::Mat> wizard[2]; // [jogador][frame]
+    std::vector<cv::Mat> wizard[2]; // [lado][frame]  lado-0 = esquerda, lado-1 = direita
     cv::Mat shield;
-    cv::Mat bolt[6];                  // estáticos (fallback)
-    std::vector<cv::Mat> boltAnim[6]; // animados: [SpellType][frame]
+    cv::Mat bolt[6];                   // estaticos (fallback global) — lado P0
+    cv::Mat boltFlipped[6];            // idem, pre-flipado para P1
+    std::vector<cv::Mat> boltAnim[6];  // animados: [SpellType][frame] — lado P0
+    std::vector<cv::Mat> boltAnimFlipped[6]; // idem, pre-flipado para P1
     cv::Mat background;               // opcional, BGR
 
-    bool load(const std::string &dir);
+    // p1Id / p2Id: prefixo do personagem (ex: "derzu", "baltar") —
+    // os arquivos esperados sao "sprites/players/<id>_player.png" e
+    // "sprites/spells/<spell>_<id>.png" com fallback para os sprites padrao.
+    bool load(const std::string &dir,
+              const std::string &p1PlayerFile,
+              const std::string &p2PlayerFile,
+              const std::string &p1Id = "",
+              const std::string &p2Id = "");
 };
