@@ -8,6 +8,7 @@
 #include "game/spells.h"
 #include "vision/split_screen.h"
 #include "game/menu_ui.h"
+#include "core/timer.h"
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
@@ -54,6 +55,21 @@ static cv::Mat makeCameraView(const cv::Mat& source, const cv::Rect& zone,
     return square;
 }
 
+// Sobreposicao "PAUSADO" desenhada por cima do frame enquanto a pausa esta ativa.
+static void drawPausedOverlay(cv::Mat& img) {
+    if (img.empty()) return;
+    const char* txt = "PAUSADO";
+    const double scale = std::max(1.0, img.cols / 900.0);
+    int baseline = 0;
+    const cv::Size ts = cv::getTextSize(txt, cv::FONT_HERSHEY_DUPLEX, scale, 3, &baseline);
+    const cv::Point org((img.cols - ts.width) / 2, (img.rows + ts.height) / 2);
+    const cv::Rect box(org.x - 28, org.y - ts.height - 18, ts.width + 56, ts.height + 36);
+    cv::rectangle(img, box, cv::Scalar(12, 10, 20), cv::FILLED);
+    cv::rectangle(img, box, cv::Scalar(120, 230, 255), 2, cv::LINE_AA);
+    cv::putText(img, txt, org, cv::FONT_HERSHEY_DUPLEX, scale,
+                cv::Scalar(140, 245, 255), 3, cv::LINE_AA);
+}
+
 int main(int argc, char** argv) {
     int camIdx = 0;
     for (int i = 1; i < argc; ++i)
@@ -90,40 +106,41 @@ int main(int argc, char** argv) {
     Assets assets;
     bool assetsLoaded = false;
     bool debug = false;
+    bool paused = false;
     cv::Mat frame;
-    int64 tPrev = cv::getTickCount();
+    FrameTimer frameTimer;
 
     for (;;) {
         if (!cam.read(frame)) break;
         mouseCtx.size = frame.size();
 
-        const int64 t = cv::getTickCount();
-        const double dt = (t - tPrev) / cv::getTickFrequency();
-        tPrev = t;
-        const double nowSec = double(t) / cv::getTickFrequency();
+        const double dt = frameTimer.tick();
+        const double nowSec = frameTimer.now();
 
-        // Atualiza deteccao/Kalman das duas varinhas
-        game.update(frame, nowSec);
+        // Atualiza deteccao/Kalman das duas varinhas (congeladas quando pausado)
+        if (!paused)
+            game.update(frame, nowSec);
         Tracked t1 = game.player(0).trk;
         Tracked t2 = game.player(1).trk;
 
-        for (int p = 0; p < 2; ++p) {
-            sinceMs[p] += dt * 1000.0;
-            if (game.pen[p].hasFinishedStroke()) {
-                if (menu.screen() == GameScreen::DuelReady) {
-                    std::vector<cv::Point2f> stroke = game.pen[p].getStroke();
-                    lastResult[p] = classifier.classify(stroke);
-                    if (lastResult[p].shape != Shape::Nenhum) {
-                        if (match.cast(p, lastResult[p].shape))
-                            sinceMs[p] = 0.0;
-                        else
-                            lastResult[p].resultText = "Feitico indisponivel";
+        if (!paused)
+            for (int p = 0; p < 2; ++p) {
+                sinceMs[p] += dt * 1000.0;
+                if (game.pen[p].hasFinishedStroke()) {
+                    if (menu.screen() == GameScreen::DuelReady) {
+                        std::vector<cv::Point2f> stroke = game.pen[p].getStroke();
+                        lastResult[p] = classifier.classify(stroke);
+                        if (lastResult[p].shape != Shape::Nenhum) {
+                            if (match.cast(p, lastResult[p].shape))
+                                sinceMs[p] = 0.0;
+                            else
+                                lastResult[p].resultText = "Feitico indisponivel";
+                        }
                     }
+                    game.pen[p].resetStroke();
+                    game.pen[p].canvas.setTo(cv::Scalar::all(0));
                 }
-                game.pen[p].resetStroke();
-                game.pen[p].canvas.setTo(cv::Scalar::all(0));
             }
-        }
 
         if (menu.screen() == GameScreen::DuelReady) {
             // Carrega assets uma unica vez ao entrar no duelo
@@ -138,15 +155,16 @@ int main(int argc, char** argv) {
                             menu.characterId(i1), menu.characterId(i2));
                 assetsLoaded = true;
             }
-            match.update(dt);
+            if (!paused) match.update(dt);
         } else {
             // Fora do duelo, reseta flag para permitir troca de personagem
             assetsLoaded = false;
-            menu.update(frame.size(), t1, t2, dt);
+            if (!paused) menu.update(frame.size(), t1, t2, dt);
             menu.draw(frame);
         }
 
         if (menu.screen() != GameScreen::DuelReady) {
+            if (paused) drawPausedOverlay(frame);
             cv::imshow(camWin, frame);
         } else {
             const int width = frame.cols;
@@ -228,6 +246,7 @@ int main(int argc, char** argv) {
             drawGame(arena, match, assets);
             cv::line(display, {0, cameraY}, {width, cameraY},
                      cv::Scalar(100, 100, 110), 1, cv::LINE_AA);
+            if (paused) drawPausedOverlay(display);
             cv::imshow(camWin, display);
         }
 
@@ -235,6 +254,7 @@ int main(int argc, char** argv) {
         const int k = cv::waitKey(1);
         if (k == 27) break;
         if (k == 'r' || k == 'R') { menu.resetSelection(); match.reset(); }
+        if (k == ' ') paused = !paused;
         if (k == 'm' || k == 'M') menu.setScreen(GameScreen::Title);
         if (k == 'd' || k == 'D') {
             debug = !debug;
