@@ -3,6 +3,21 @@
 #include "game/match.h"
 #include <opencv2/imgproc.hpp>
 
+// Reduz o sprite se ele for mais alto que a arena (em vez de cortar).
+static void drawFit(cv::Mat &view, const cv::Mat &spr, cv::Point center)
+{
+    const int maxH = view.rows - 4;
+    if (maxH > 0 && spr.rows > maxH)
+    {
+        cv::Mat r;
+        const double s = double(maxH) / spr.rows;
+        cv::resize(spr, r, {}, s, s, cv::INTER_AREA);
+        drawSprite(view, r, center);
+    }
+    else
+        drawSprite(view, spr, center);
+}
+
 void drawGame(cv::Mat &view, const Match &m, const Assets &as)
 {
     if (!as.background.empty())
@@ -29,7 +44,7 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as)
         if (!fr.empty())
         {
             int f = int(m.time() * 8) % int(fr.size()); // 8 quadros por segundo
-            drawSprite(view, fr[f], {xs[p], H / 2});
+            drawFit(view, fr[f], {xs[p], H / 2});
         }
         else
             cv::circle(view, {xs[p], H / 2}, 30,
@@ -37,7 +52,7 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as)
         if (m.hasShield(p))
         {
             if (!as.shield[p].empty())
-                drawSprite(view, as.shield[p], {xs[p], H / 2});
+                drawFit(view, as.shield[p], {xs[p], H / 2});
             else
                 cv::circle(view, {xs[p], H / 2}, 50, {255, 255, 255}, 3);
         }
@@ -47,8 +62,8 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as)
     {
         int x = xs[pr.owner] + int((xs[1 - pr.owner] - xs[pr.owner]) * pr.t);
 
-        const auto &anim = pr.owner == 1 ? as.boltAnimFlipped[int(pr.type)]
-                                         : as.boltAnim[int(pr.type)];
+        const auto &anim = pr.owner == 1 ? as.boltAnimFlipped[1][int(pr.type)]
+                                         : as.boltAnim[0][int(pr.type)];
         const cv::Mat *spr = nullptr;
         if (!anim.empty())
         {
@@ -57,13 +72,13 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as)
         }
         else
         {
-            spr = pr.owner == 1 ? &as.boltFlipped[int(pr.type)]
-                                : &as.bolt[int(pr.type)];
+            spr = pr.owner == 1 ? &as.boltFlipped[1][int(pr.type)]
+                                : &as.bolt[0][int(pr.type)];
         }
 
         if (!spr->empty())
         {
-            drawSprite(view, *spr, {x, H / 2});
+            drawFit(view, *spr, {x, H / 2});
         }
         else
             cv::circle(view, {x, H / 2}, 10 + int(pr.damage / 3), {80, 80, 255}, cv::FILLED);

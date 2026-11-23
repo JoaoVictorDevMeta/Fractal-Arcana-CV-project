@@ -20,10 +20,10 @@ struct Assets
 {
     std::vector<cv::Mat> wizard[2]; // [lado][frame]  lado-0 = esquerda, lado-1 = direita
     cv::Mat shield[2];
-    cv::Mat bolt[6];                   // estaticos (fallback global) — lado P0
-    cv::Mat boltFlipped[6];            // idem, pre-flipado para P1
-    std::vector<cv::Mat> boltAnim[6];  // animados: [SpellType][frame] — lado P0
-    std::vector<cv::Mat> boltAnimFlipped[6]; // idem, pre-flipado para P1
+    cv::Mat bolt[2][6];                   // estaticos (fallback global) — lado P0
+    cv::Mat boltFlipped[2][6];            // idem, pre-flipado para P1
+    std::vector<cv::Mat> boltAnim[2][6];  // animados: [SpellType][frame] — lado P0
+    std::vector<cv::Mat> boltAnimFlipped[2][6]; // idem, pre-flipado para P1
     cv::Mat background;               // opcional, BGR
 
     // p1Id / p2Id: prefixo do personagem (ex: "derzu", "baltar") —
