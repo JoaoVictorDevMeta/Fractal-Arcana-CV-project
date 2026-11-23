@@ -36,8 +36,8 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as)
                        p == 0 ? cv::Scalar(255, 200, 80) : cv::Scalar(80, 200, 255), cv::FILLED);
         if (m.hasShield(p))
         {
-            if (!as.shield.empty())
-                drawSprite(view, as.shield, {xs[p], H / 2});
+            if (!as.shield[p].empty())
+                drawSprite(view, as.shield[p], {xs[p], H / 2});
             else
                 cv::circle(view, {xs[p], H / 2}, 50, {255, 255, 255}, 3);
         }

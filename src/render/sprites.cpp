@@ -234,10 +234,26 @@ bool Assets::load(const std::string &dir,
         }
     }
 
-    // --- Escudo ---
-    shield = loadSprite(dir + "/sprites/spells/shield.png", 200);
-    if (shield.empty())
-        shield = loadSprite(dir + "/shield.png", 200);
+     // --- Escudo Fallback (Carrega o padrao para os dois) ---
+    cv::Mat defaultShield = loadSprite(dir + "/sprites/spells/shield.png", 200);
+    if (defaultShield.empty())
+        defaultShield = loadSprite(dir + "/shield.png", 200);
+
+    // --- Escudo P1 ---
+    shield[0] = defaultShield.clone();
+    if (!p1Id.empty()) {
+        std::string shieldSpec1 = dir + "/sprites/spells/escudo_" + p1Id + ".png";
+        cv::Mat sc1 = loadSprite(shieldSpec1, 200);
+        if (!sc1.empty()) shield[0] = sc1;
+    }
+
+    // --- Escudo P2 ---
+    shield[1] = defaultShield.clone();
+    if (!p2Id.empty()) {
+        std::string shieldSpec2 = dir + "/sprites/spells/escudo_" + p2Id + ".png";
+        cv::Mat sc2 = loadSprite(shieldSpec2, 200);
+        if (!sc2.empty()) shield[1] = sc2;
+    }
 
     // --- Feiticos globais (fallback) ---
     bolt[int(SpellType::AtaqueFraco)]    = loadSprite(dir + "/fireball1.png", 120);
@@ -259,16 +275,8 @@ bool Assets::load(const std::string &dir,
         tryLoadSpell(dir, "especial", mainId,
                      bolt[int(SpellType::AtaqueEspecial)], 180);
 
-    // Escudo especifico por personagem tambem pode ser animacao
-    if (!mainId.empty())
-    {
-        std::string shieldSpec = dir + "/sprites/spells/escudo_" + mainId + ".png";
-        cv::Mat sc = loadSprite(shieldSpec, 200);
-        if (!sc.empty()) shield = sc;
-    }
-
     // --- Background ---
-    cv::Mat bg = cv::imread(dir + "/sprites/ui/background.png");
+    cv::Mat bg = cv::imread(dir + "/sprites/ui/fundoBatalha.jpg");
     if (!bg.empty())
         cv::resize(bg, background, {1280, 720});
 

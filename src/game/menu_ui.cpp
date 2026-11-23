@@ -53,7 +53,7 @@ MenuUI::MenuUI() {
     // playerImage: spritesheet usado no jogo (xxx_player.png)
     chars_ = {
         {"derzu",      "Derzu Omaia",         "derzu_select",      "derzu_player.png"},
-        {"meneghetti", "Meneghetti, o Macom", "menegueti_select",  "menegueti_player.png"},
+        {"menegueti",  "Meneghetti, o Macom", "menegueti_select",  "menegueti_player.png"},
         {"venegas",    "Venegas",             "venegas_select",    "venegas_player.png"},
         {"neri",       "Neri",                "neri-select",       "neri_player.png"},
         {"baltar",     "Baltar MST",          "baltar_select",     "baltar_player.png"},
@@ -118,96 +118,17 @@ std::string MenuUI::characterName(int idx) const {
 void MenuUI::ensureBackground_(const cv::Size& size) {
     if (!bgCache_.empty() && bgCache_.size() == size) return;
     lastSize_ = size;
-    bgCache_ = cv::Mat(size, CV_8UC3);
-    drawMedievalBackground_(bgCache_);
+    
+    cv::Mat bg = tryLoadImage("assets/sprites/ui/fundoMenu");
+    
+    if (!bg.empty()){
+        cv::resize(bg, bgCache_, size, 0, 0, cv::INTER_LINEAR);
+    } else {
+        bgCache_ = cv::Mat(size, CV_8UC3, cv::Scalar(20, 15, 30));
+    }
+
     buildTitleLayout_(size);
     buildCharacterLayout_(size);
-}
-
-void MenuUI::drawMedievalBackground_(cv::Mat& bg) const {
-    const int w = bg.cols;
-    const int h = bg.rows;
-
-    // 1. Ceu noturno / crepusculo magico em degraus pixelados
-    const int bands = 18;
-    const int bandH = std::max(1, h / bands);
-    for (int b = 0; b < bands; ++b) {
-        float t = float(b) / float(std::max(1, bands - 1));
-        int blue  = cvRound((1.f - t) * 75.f + t * 28.f);
-        int green = cvRound((1.f - t) * 42.f + t * 24.f);
-        int red   = cvRound((1.f - t) * 32.f + t * 18.f);
-        cv::rectangle(bg, {0, b * bandH}, {w, (b + 1) * bandH + 1}, cv::Scalar(blue, green, red), cv::FILLED);
-    }
-
-    // Estrelas / particulas arcanas pixeladas
-    for (int i = 0; i < 65; ++i) {
-        int sx = (i * 197 + 53) % std::max(1, w);
-        int sy = (i * 89 + 29) % std::max(1, (h * 55) / 100);
-        cv::Scalar starCol = (i % 3 == 0) ? cv::Scalar(255, 220, 120) : cv::Scalar(210, 235, 255);
-        cv::rectangle(bg, {sx, sy}, {sx + 3, sy + 3}, starCol, cv::FILLED);
-    }
-
-    // 2. Silhueta de castelo medieval ao fundo
-    const int horizonY = (h * 62) / 100;
-    const cv::Scalar castleDark(38, 32, 42);
-    const cv::Scalar castleStone(62, 54, 68);
-    int cx = w / 2 - w / 6;
-    int cw = w / 3;
-    int ch = h / 4;
-    cv::rectangle(bg, {cx, horizonY - ch / 2}, {cx + cw, horizonY + 20}, castleDark, cv::FILLED);
-    for (int t = 0; t < 5; ++t) {
-        int tx = cx + t * (cw / 4) - 18;
-        int th = (t % 2 == 0) ? ch + 35 : ch + 10;
-        cv::rectangle(bg, {tx, horizonY - th}, {tx + 36, horizonY + 10}, castleStone, cv::FILLED);
-        // Telhado pontiagudo medieval
-        std::vector<cv::Point> roof{
-            {tx - 6, horizonY - th},
-            {tx + 18, horizonY - th - 28},
-            {tx + 42, horizonY - th}
-        };
-        cv::fillPoly(bg, {roof}, cv::Scalar(45, 35, 95));
-    }
-
-    // 3. Colunas medievais e tochas magicas nas laterais
-    const cv::Scalar pillarCol(52, 48, 58);
-    const cv::Scalar pillarHi(82, 76, 92);
-    std::array<int, 2> pxList{std::max(24, w / 14), std::max(24, w - w / 14 - 44)};
-    for (int px : pxList) {
-        cv::rectangle(bg, {px, horizonY - 120}, {px + 44, h}, pillarCol, cv::FILLED);
-        cv::rectangle(bg, {px + 4, horizonY - 120}, {px + 12, h}, pillarHi, cv::FILLED);
-        // Chama magica ciano/dourada
-        cv::circle(bg, {px + 22, horizonY - 134}, 14, cv::Scalar(255, 170, 40), cv::FILLED);
-        cv::circle(bg, {px + 22, horizonY - 136}, 8,  cv::Scalar(255, 245, 160), cv::FILLED);
-    }
-
-    // 4. Solo de pedra e vegetacao / vinhas medievais
-    cv::rectangle(bg, {0, horizonY}, {w, h}, cv::Scalar(28, 46, 26), cv::FILLED);
-    cv::rectangle(bg, {0, horizonY}, {w, horizonY + 14}, cv::Scalar(48, 86, 42), cv::FILLED);
-
-    // Arbustos e folhagens em blocos pixelados
-    const int stepX = 28;
-    for (int x = 0; x < w; x += stepX) {
-        int bushH = 14 + ((x * 37) % 26);
-        cv::Scalar leaf1((x / stepX) % 2 == 0 ? cv::Scalar(34, 118, 48) : cv::Scalar(42, 136, 56));
-        cv::Scalar leaf2(68, 175, 82);
-        cv::rectangle(bg, {x, horizonY - bushH}, {x + stepX - 2, horizonY + 6}, leaf1, cv::FILLED);
-        cv::rectangle(bg, {x + 4, horizonY - bushH + 3}, {x + stepX - 8, horizonY - bushH + 9}, leaf2, cv::FILLED);
-
-        // Vinhas pendendo do topo
-        if ((x / stepX) % 3 == 0) {
-            int vineLen = 36 + ((x * 19) % 55);
-            for (int vy = 0; vy < vineLen; vy += 8) {
-                int vx = x + cvRound(6.0 * std::sin(vy * 0.08));
-                cv::rectangle(bg, {vx, vy}, {vx + 6, vy + 6}, cv::Scalar(46, 145, 62), cv::FILLED);
-            }
-        }
-    }
-
-    // Grade sutil estilo pixel-art
-    const int pxGrid = 4;
-    for (int y = 0; y < h; y += pxGrid * 3) {
-        cv::line(bg, {0, y}, {w, y}, cv::Scalar(15, 15, 20), 1);
-    }
 }
 
 void MenuUI::buildTitleLayout_(const cv::Size& size) {
