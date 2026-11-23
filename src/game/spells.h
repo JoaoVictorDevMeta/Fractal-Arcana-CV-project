@@ -42,9 +42,9 @@ static_assert(static_cast<std::size_t>(Shape::Nenhum) == 5,
 inline std::array<SpellDef, kShapeCount> &spellTable()
 {
     static std::array<SpellDef, kShapeCount> table = {{
-        //  nome                tipo                        mana  dano  travessia  dur  blocks
+        //  nome                tipo            mana  dano  travessia  dur  blocks
         {"Bola de fogo", SpellType::AtaqueFraco, 8.f, 6.f, 1.6f, 0.f, 0},          // Linha
-        {"Relampago", SpellType::AtaqueMedio, 30.f, 14.f, 1.3f, 0.f, 0},           // Raio
+        {"Relampago", SpellType::AtaqueMedio, 30.f, 14.f, 0.5f, 0.f, 0},           // Raio
         {"Escudo", SpellType::Escudo, 20.f, 0.f, 0.f, 4.f, 1},                     // Circulo
         {"Chuva de pedras", SpellType::AtaqueForte, 45.f, 24.f, 2.4f, 0.f, 0},     // Triangulo
         {"Explosao de Mana", SpellType::AtaqueEspecial, 80.f, 40.f, 1.5f, 0.f, 0}, // Estrela

@@ -3,6 +3,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/geometry/2d.hpp>
+#include <algorithm>
 #include <cstdio>
 
 cv::Mat loadSprite(const std::string &path, int height)
@@ -42,7 +43,6 @@ void drawSprite(cv::Mat &dst, const cv::Mat &spr, cv::Point center)
 
     if (s.channels() == 4)
     {
-        // Extrai canal alfa como mascara e usa copyTo acelerado pelo OpenCV
         std::vector<cv::Mat> ch;
         cv::split(s, ch);
         cv::Mat alpha = ch[3];
@@ -50,16 +50,14 @@ void drawSprite(cv::Mat &dst, const cv::Mat &spr, cv::Point center)
         cv::merge(std::vector<cv::Mat>{ch[0], ch[1], ch[2]}, bgr);
 
         // Blending alpha: destino = src*a + dst*(1-a)
-        // Feito em float para precisao, mas so nos pixels nao-transparentes
         cv::Mat alphaf, invAlphaf;
         alpha.convertTo(alphaf, CV_32F, 1.0 / 255.0);
-        invAlphaf = 1.0f - alphaf;  // escalar broadcast
+        invAlphaf = 1.0f - alphaf;
 
         cv::Mat srcf, dstf;
         bgr.convertTo(srcf, CV_32FC3);
         d.convertTo(dstf, CV_32FC3);
 
-        // Multiplica canal a canal
         cv::Mat result = cv::Mat::zeros(d.size(), CV_32FC3);
         for (int c = 0; c < 3; ++c)
         {
@@ -73,32 +71,71 @@ void drawSprite(cv::Mat &dst, const cv::Mat &spr, cv::Point center)
     }
     else
     {
-        // Sem alfa: copia diretamente
         s.copyTo(d);
     }
 }
 
-std::vector<cv::Mat> loadStrip(const std::string &path, int frameW, int height)
+// ------------------------------------------------------------
+// Helpers de spritesheet / imagem unica
+// ------------------------------------------------------------
+
+// Fatia um spritesheet horizontal em quadros de largura frameW.
+static std::vector<cv::Mat> sliceStrip(const cv::Mat &sheet, int frameW, int height)
 {
     std::vector<cv::Mat> frames;
-    cv::Mat sheet = loadSprite(path); // mantém o alfa, sem redimensionar
-    if (sheet.empty())
-        return frames;
-
     const int n = sheet.cols / frameW;
     const double s = double(height) / sheet.rows;
     for (int i = 0; i < n; ++i)
     {
         cv::Mat f = sheet(cv::Rect(i * frameW, 0, frameW, sheet.rows)).clone();
-        cv::resize(f, f, {}, s, s, cv::INTER_NEAREST); // mantém o pixel art nítido
+        cv::resize(f, f, {}, s, s, cv::INTER_NEAREST); // mantem o pixel art nitido
         frames.push_back(f);
     }
     return frames;
 }
 
+// So considera spritesheet se a largura for multiplo exato de frameW
+// e a altura for compativel com quadros de frameW (ex.: 32x32).
+// frameW <= 0 => nunca e strip.
+static bool looksLikeStrip(const cv::Mat &sheet, int frameW)
+{
+    return frameW > 0 &&
+           sheet.cols >= 2 * frameW &&
+           sheet.cols % frameW == 0 &&
+           sheet.rows <= 2 * frameW;
+}
+
+// Corta a margem transparente e escala mantendo proporcao,
+// respeitando altura maxima E largura maxima (sem distorcer).
+static cv::Mat cropAndFit(const cv::Mat &src, int maxH, int maxW)
+{
+    cv::Mat out = src;
+    if (src.channels() == 4)
+    {
+        cv::Mat alpha, mask;
+        cv::extractChannel(src, alpha, 3);
+        cv::threshold(alpha, mask, 8, 255, cv::THRESH_BINARY);
+        cv::Rect bb = cv::boundingRect(mask);
+        if (!bb.empty())
+            out = src(bb);
+    }
+    const double s = std::min(double(maxH) / out.rows, double(maxW) / out.cols);
+    cv::Mat r;
+    cv::resize(out, r, {}, s, s, s < 1.0 ? cv::INTER_AREA : cv::INTER_NEAREST);
+    return r;
+}
+
+// Declarada em sprites.h. Retorna vazio se a imagem nao for spritesheet.
+std::vector<cv::Mat> loadStrip(const std::string &path, int frameW, int height)
+{
+    cv::Mat sheet = loadSprite(path);
+    if (sheet.empty() || !looksLikeStrip(sheet, frameW))
+        return {};
+    return sliceStrip(sheet, frameW, height);
+}
+
 // ------------------------------------------------------------
-// Carrega wizard: tenta spritesheet (largura = kWizardFrames * h),
-// senao carrega como imagem unica. Retorna false se falhou tudo.
+// Carrega wizard: spritesheet (kWizardFrames) ou imagem unica.
 // out[0] = frames normais, out[1] = frames espelhados (oponente).
 // ------------------------------------------------------------
 bool loadWizardFrames(const std::string &path, std::vector<cv::Mat> out[2])
@@ -110,8 +147,6 @@ bool loadWizardFrames(const std::string &path, std::vector<cv::Mat> out[2])
     if (sheet.empty())
         return false;
 
-    // Detecta se é spritesheet: largura >= kWizardFrames * height/2
-    // (heuristica: se tem muitos frames horizontais)
     const bool isStrip = (sheet.cols >= sheet.rows * 2);
 
     std::vector<cv::Mat> raw;
@@ -123,7 +158,6 @@ bool loadWizardFrames(const std::string &path, std::vector<cv::Mat> out[2])
     }
     else
     {
-        // Imagem unica: usa o mesmo frame para todos os kWizardFrames
         for (int i = 0; i < kWizardFrames; ++i)
             raw.push_back(sheet.clone());
     }
@@ -141,7 +175,6 @@ bool loadWizardFrames(const std::string &path, std::vector<cv::Mat> out[2])
         }
         else
         {
-            // sem alfa: considera tudo opaco
             alphaMax.setTo(255);
         }
     }
@@ -163,134 +196,137 @@ bool loadWizardFrames(const std::string &path, std::vector<cv::Mat> out[2])
     return true;
 }
 
-// ------------------------------------------------------------
-// Tenta carregar um sprite de feitico especifico do personagem;
-// se nao existir, usa o fallback global (ja carregado em bolt/boltAnim).
-// ------------------------------------------------------------
-static cv::Mat tryLoadSpell(const std::string &dir,
-                             const std::string &spellName,
-                             const std::string &charId,
-                             const cv::Mat &fallback,
-                             int height)
-{
-    if (!charId.empty())
-    {
-        // ex: assets/sprites/spells/escudo_derzu.png
-        std::string specific = dir + "/sprites/spells/" + spellName + "_" + charId + ".png";
-        cv::Mat m = loadSprite(specific, height);
-        if (!m.empty())
-        {
-            std::fprintf(stdout, "Carregou feitico especifico: %s\n", specific.c_str());
-            return m;
-        }
-    }
-    return fallback; // fallback global
-}
-
-static std::vector<cv::Mat> tryLoadSpellAnim(const std::string &dir,
-                                              const std::string &spellName,
-                                              const std::string &charId,
-                                              const std::vector<cv::Mat> &fallback,
-                                              int frameW, int height)
-{
-    if (!charId.empty())
-    {
-        std::string specific = dir + "/sprites/spells/" + spellName + "_" + charId + ".png";
-        auto frames = loadStrip(specific, frameW, height);
-        if (!frames.empty())
-        {
-            std::fprintf(stdout, "Carregou animacao especifica: %s\n", specific.c_str());
-            return frames;
-        }
-    }
-    return fallback;
-}
-
 bool Assets::load(const std::string &dir,
                   const std::string &p1PlayerFile,
                   const std::string &p2PlayerFile,
                   const std::string &p1Id,
                   const std::string &p2Id)
 {
+    // --- Limpa estado antigo (ao trocar de personagem) ---
+    wizard[0].clear();
+    wizard[1].clear();
+    for (int p = 0; p < 2; ++p)
+    {
+        shield[p] = cv::Mat();
+        for (int i = 0; i < 6; ++i)
+        {
+            bolt[p][i] = cv::Mat();
+            boltFlipped[p][i] = cv::Mat();
+            boltAnim[p][i].clear();
+            boltAnimFlipped[p][i].clear();
+        }
+    }
+
     // --- Wizards ---
-    // P1 (lado esquerdo = wizard[0], espelhado = wizard[1])
     {
-        std::vector<cv::Mat> sides[2];
-        if (loadWizardFrames(dir + "/sprites/players/" + p1PlayerFile, sides))
+        std::vector<cv::Mat> sides1[2];
+        if (loadWizardFrames(dir + "/sprites/players/" + p1PlayerFile, sides1))
         {
-            wizard[0] = sides[0]; // frames normais para o lado esquerdo
-            // wizard[1] sera sobrescrito por P2; se P2 falhar, usa o espelhado de P1
-            if (wizard[1].empty())
-                wizard[1] = sides[1];
+            wizard[0] = sides1[0];
+            wizard[1] = sides1[1]; // sera sobrescrito por P2 se carregar
         }
     }
-
-    // P2 (lado direito = wizard[1] com sprite espelhado)
     {
-        std::vector<cv::Mat> sides[2];
-        if (loadWizardFrames(dir + "/sprites/players/" + p2PlayerFile, sides))
-        {
-            wizard[1] = sides[1]; // frames espelhados para o lado direito
-        }
+        std::vector<cv::Mat> sides2[2];
+        if (loadWizardFrames(dir + "/sprites/players/" + p2PlayerFile, sides2))
+            wizard[1] = sides2[1]; // espelhado para o lado direito
     }
 
-     // --- Escudo Fallback (Carrega o padrao para os dois) ---
+    // --- Escudo ---
     cv::Mat defaultShield = loadSprite(dir + "/sprites/spells/shield.png", 200);
     if (defaultShield.empty())
         defaultShield = loadSprite(dir + "/shield.png", 200);
 
-    // --- Escudo P1 ---
     shield[0] = defaultShield.clone();
-    if (!p1Id.empty()) {
-        std::string shieldSpec1 = dir + "/sprites/spells/escudo_" + p1Id + ".png";
-        cv::Mat sc1 = loadSprite(shieldSpec1, 200);
-        if (!sc1.empty()) shield[0] = sc1;
+    if (!p1Id.empty())
+    {
+        cv::Mat sc = loadSprite(dir + "/sprites/spells/escudo_" + p1Id + ".png", 200);
+        if (!sc.empty())
+            shield[0] = sc;
     }
-
-    // --- Escudo P2 ---
     shield[1] = defaultShield.clone();
-    if (!p2Id.empty()) {
-        std::string shieldSpec2 = dir + "/sprites/spells/escudo_" + p2Id + ".png";
-        cv::Mat sc2 = loadSprite(shieldSpec2, 200);
-        if (!sc2.empty()) shield[1] = sc2;
+    if (!p2Id.empty())
+    {
+        cv::Mat sc = loadSprite(dir + "/sprites/spells/escudo_" + p2Id + ".png", 200);
+        if (!sc.empty())
+            shield[1] = sc;
     }
 
     // --- Feiticos globais (fallback) ---
-    bolt[int(SpellType::AtaqueFraco)]    = loadSprite(dir + "/fireball1.png", 120);
-    boltAnim[int(SpellType::AtaqueMedio)]   = loadStrip(dir + "/orb_projectile_32x32_blue.png", 32, 100);
-    boltAnim[int(SpellType::AtaqueEspecial)] = loadStrip(dir + "/orb_projectile_32x32_red.png", 32, 180);
-    bolt[int(SpellType::AtaqueForte)]    = loadSprite(dir + "/rock.png", 70);
+    cv::Mat defFraco = loadSprite(dir + "/fireball1.png", 120);
+    std::vector<cv::Mat> defMedio = loadStrip(dir + "/orb_projectile_32x32_blue.png", 32, 100);
+    std::vector<cv::Mat> defEspecial = loadStrip(dir + "/orb_projectile_32x32_red.png", 32, 180);
+    cv::Mat defForte = loadSprite(dir + "/rock.png", 70);
 
-    // --- Feiticos especificos por personagem (com fallback para o global) ---
-    // Para simplificar, usa os do P1 (poderia ser expandido para usar por turno)
-    // Nomes de arquivo esperados: escudo_<id>.png, especial_<id>.png
-    // (use o id do personagem passado; se vazio, nao tenta especifico)
-    const std::string mainId = p1Id; // feiticos visuais do P1 por padrao
+    auto flipAll = [](const std::vector<cv::Mat> &in)
+    {
+        std::vector<cv::Mat> out(in.size());
+        for (size_t i = 0; i < in.size(); ++i)
+            cv::flip(in[i], out[i], 1);
+        return out;
+    };
+    const std::vector<cv::Mat> defMedioF = flipAll(defMedio);
+    const std::vector<cv::Mat> defEspecialF = flipAll(defEspecial);
 
-    bolt[int(SpellType::Escudo)] =
-        tryLoadSpell(dir, "escudo", mainId,
-                     bolt[int(SpellType::Escudo)], 200);
+    // --- Feiticos por personagem ---
+    // IMPORTANTE: o slot e o valor do enum SpellType, porque o HUD
+    // acessa bolt[owner][int(pr.type)].
+    const std::string spells = dir + "/sprites/spells/";
+    for (int p = 0; p < 2; ++p)
+    {
+        std::string id = (p == 0) ? p1Id : p2Id;
+        if (id.empty())
+            id = "padrao";
 
-    bolt[int(SpellType::AtaqueEspecial)] =
-        tryLoadSpell(dir, "especial", mainId,
-                     bolt[int(SpellType::AtaqueEspecial)], 180);
+        auto loadSlot = [&](SpellType type, const std::string &file, int frameW, int h, int maxW,
+                            const cv::Mat &defStill,
+                            const std::vector<cv::Mat> &defAnim,
+                            const std::vector<cv::Mat> &defAnimF)
+        {
+            const int slot = static_cast<int>(type);
+            cv::Mat sheet = loadSprite(spells + file); // sem redimensionar
+            if (!sheet.empty())
+            {
+                if (looksLikeStrip(sheet, frameW))
+                {
+                    boltAnim[p][slot] = sliceStrip(sheet, frameW, h);
+                    boltAnimFlipped[p][slot] = flipAll(boltAnim[p][slot]);
+                    std::fprintf(stdout, "OK %s (animado, %zu quadros)\n",
+                                 file.c_str(), boltAnim[p][slot].size());
+                }
+                else
+                {
+                    bolt[p][slot] = cropAndFit(sheet, h, maxW);
+                    cv::flip(bolt[p][slot], boltFlipped[p][slot], 1);
+                    std::fprintf(stdout, "OK %s (estatico %dx%d)\n", file.c_str(),
+                                 bolt[p][slot].cols, bolt[p][slot].rows);
+                }
+                return;
+            }
+            // arquivo nao existe -> fallback global
+            if (!defAnim.empty())
+            {
+                boltAnim[p][slot] = defAnim;
+                boltAnimFlipped[p][slot] = defAnimF;
+            }
+            else if (!defStill.empty())
+            {
+                bolt[p][slot] = defStill;
+                cv::flip(defStill, boltFlipped[p][slot], 1);
+            }
+        };
+
+        const std::vector<cv::Mat> none;
+        loadSlot(SpellType::AtaqueFraco,    "projectile_" + id + ".png", 0,  120, 180, defFraco,  none,        none);
+        loadSlot(SpellType::AtaqueMedio,    "pierce_"     + id + ".png", 32, 100, 220, cv::Mat(), defMedio,    defMedioF);
+        loadSlot(SpellType::AtaqueForte,    "ray_"        + id + ".png", 0,  150, 200, defForte,  none,        none);
+        loadSlot(SpellType::AtaqueEspecial, "especial_"   + id + ".png", 32, 180, 220, cv::Mat(), defEspecial, defEspecialF);
+    }
 
     // --- Background ---
     cv::Mat bg = cv::imread(dir + "/sprites/ui/fundoBatalha.jpg");
     if (!bg.empty())
         cv::resize(bg, background, {1280, 720});
-
-    // --- Pre-flipa sprites estaticos e animados para uso do P1 (owner==1) ---
-    for (int t = 0; t < 6; ++t)
-    {
-        if (!bolt[t].empty())
-        {
-            cv::flip(bolt[t], boltFlipped[t], 1);
-        }
-        boltAnimFlipped[t].resize(boltAnim[t].size());
-        for (size_t f = 0; f < boltAnim[t].size(); ++f)
-            cv::flip(boltAnim[t][f], boltAnimFlipped[t][f], 1);
-    }
 
     return !wizard[0].empty(); // o minimo para jogar
 }
