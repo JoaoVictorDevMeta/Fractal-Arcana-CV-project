@@ -196,6 +196,37 @@ bool loadWizardFrames(const std::string &path, std::vector<cv::Mat> out[2])
     return true;
 }
 
+// Cor dominante (BGR) dos pixels opacos e saturados do sprite, clareada.
+static cv::Scalar computeTrailColor(const cv::Mat &m, const cv::Scalar &fallback)
+{
+    if (m.empty() || m.type() != CV_8UC4)
+        return fallback;
+
+    double sb = 0, sg = 0, sr = 0, n = 0;
+    for (int y = 0; y < m.rows; ++y)
+        for (int x = 0; x < m.cols; ++x)
+        {
+            const cv::Vec4b &px = m.at<cv::Vec4b>(y, x);
+            if (px[3] < 128)
+                continue;
+            int mx = std::max({px[0], px[1], px[2]});
+            int mn = std::min({px[0], px[1], px[2]});
+            if (mx - mn < 60) // ignora branco/cinza
+                continue;
+            sb += px[0];
+            sg += px[1];
+            sr += px[2];
+            n += 1;
+        }
+    if (n < 1)
+        return fallback;
+
+    sb /= n; sg /= n; sr /= n;
+    const double mx = std::max({sb, sg, sr});
+    const double k = mx > 0 ? 255.0 / mx : 1.0;
+    return cv::Scalar(sb * k, sg * k, sr * k);
+}
+
 bool Assets::load(const std::string &dir,
                   const std::string &p1PlayerFile,
                   const std::string &p2PlayerFile,
@@ -321,6 +352,18 @@ bool Assets::load(const std::string &dir,
         loadSlot(SpellType::AtaqueMedio,    "pierce_"     + id + ".png", 32, 100, 220, cv::Mat(), defMedio,    defMedioF);
         loadSlot(SpellType::AtaqueForte,    "ray_"        + id + ".png", 0,  150, 200, defForte,  none,        none);
         loadSlot(SpellType::AtaqueEspecial, "especial_"   + id + ".png", 32, 180, 220, cv::Mat(), defEspecial, defEspecialF);
+    }
+
+    for (int p = 0; p < 2; ++p)
+    {
+        const int slot = static_cast<int>(SpellType::AtaqueMedio);
+        const cv::Mat *src = nullptr;
+        if (!bolt[p][slot].empty())
+            src = &bolt[p][slot];
+        else if (!boltAnim[p][slot].empty())
+            src = &boltAnim[p][slot][0];
+
+        trailColor[p] = src ? computeTrailColor(*src, trailColor[p]) : trailColor[p];
     }
 
     // --- Background ---

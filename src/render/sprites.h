@@ -25,6 +25,7 @@ struct Assets
     std::vector<cv::Mat> boltAnim[2][6];  // animados: [SpellType][frame] — lado P0
     std::vector<cv::Mat> boltAnimFlipped[2][6]; // idem, pre-flipado para P1
     cv::Mat background;               // opcional, BGR
+    cv::Scalar trailColor[2] = {cv::Scalar(255, 220, 120), cv::Scalar(255, 220, 120)}; // cor do rastro do raio (BGR)
 
     // p1Id / p2Id: prefixo do personagem (ex: "derzu", "baltar") —
     // os arquivos esperados sao "sprites/players/<id>_player.png" e
