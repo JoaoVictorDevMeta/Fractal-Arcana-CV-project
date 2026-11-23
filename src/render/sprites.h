@@ -19,7 +19,7 @@ bool loadWizardFrames(const std::string &path, std::vector<cv::Mat> out[2]);
 struct Assets
 {
     std::vector<cv::Mat> wizard[2]; // [lado][frame]  lado-0 = esquerda, lado-1 = direita
-    cv::Mat shield;
+    cv::Mat shield[2];
     cv::Mat bolt[6];                   // estaticos (fallback global) — lado P0
     cv::Mat boltFlipped[6];            // idem, pre-flipado para P1
     std::vector<cv::Mat> boltAnim[6];  // animados: [SpellType][frame] — lado P0

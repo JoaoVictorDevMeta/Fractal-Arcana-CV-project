@@ -16,8 +16,8 @@ enum class GameScreen {
 struct CharacterDef {
     std::string id;
     std::string name;
-    std::string selectImage;  // xxx_select.{png,jpeg} — retrato no menu
-    std::string playerImage;  // xxx_player.png        — spritesheet no jogo
+    std::string selectImage;  // xxx_select.{png,jpeg}  retrato no menu
+    std::string playerImage;  // xxx_player.png         spritesheet no jogo
     cv::Mat portrait;         // carregada do disco ou gerada como fallback
     cv::Rect cardRect;        // area na tela de selecao
     float drawProgress[2] = {0.f, 0.f}; // progresso desenhado pela varinha de P1 e P2
@@ -70,7 +70,6 @@ private:
                          const cv::Scalar& borderInner,
                          bool highlight = false) const;
 
-    void drawMedievalBackground_(cv::Mat& bg) const;
     void drawTitleScreen_(cv::Mat& frame) const;
     void drawInfoScreen_(cv::Mat& frame) const;
     void drawCharacterSelect_(cv::Mat& frame) const;
