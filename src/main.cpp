@@ -269,7 +269,7 @@ int main(int argc, char **argv)
             }
 
             cv::Mat arena = display(cv::Rect(0, height - arenaHeight, width, arenaHeight));
-            drawGame(arena, match, assets);
+            drawGame(arena, match, assets, menu.glowEnabled());
             cv::line(display, {0, cameraY}, {width, cameraY},
                      cv::Scalar(100, 100, 110), 1, cv::LINE_AA);
             if (paused)

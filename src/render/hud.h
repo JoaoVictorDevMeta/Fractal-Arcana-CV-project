@@ -7,7 +7,8 @@ class Match; // declaração antecipada: evita incluir o match.h inteiro
 // Desenha o cenario completo (fundo, jogadores, projeteis, barras) em 'view'.// hud.h
 struct Assets;
 
-void drawGame(cv::Mat &view, const Match &match, const Assets &assets);
+// glowEffects = false desliga os brilhos aditivos (mais leve em PCs fracos).
+void drawGame(cv::Mat &view, const Match &match, const Assets &assets, bool glowEffects = true);
 
 enum class BarKind
 {
