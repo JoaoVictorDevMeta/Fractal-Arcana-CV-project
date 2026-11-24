@@ -30,6 +30,29 @@ static float rnd(int a, int b) // ruido deterministico em [-1, 1]
     return (h & 0xFFFF) / 65535.f * 2.f - 1.f;
 }
 
+// Copia do sprite misturada com vermelho (preserva o alfa). k01: 0 = original, 1 = mais vermelho.
+static cv::Mat tintRed(const cv::Mat &spr, float k01)
+{
+    cv::Mat out = spr.clone();
+    if (out.empty() || out.depth() != CV_8U || out.channels() < 3)
+        return out;
+
+    const float k = std::clamp(k01, 0.f, 1.f) * 0.65f;
+    const int cn = out.channels();
+    for (int y = 0; y < out.rows; ++y)
+    {
+        uchar *row = out.ptr<uchar>(y);
+        for (int x = 0; x < out.cols; ++x)
+        {
+            uchar *px = row + x * cn;
+            px[0] = uchar(px[0] * (1.f - k) + 40 * k);  // B
+            px[1] = uchar(px[1] * (1.f - k) + 40 * k);  // G
+            px[2] = uchar(px[2] * (1.f - k) + 255 * k); // R
+        }
+    }
+    return out;
+}
+
 // Rastro de raio atras do projetil: head = ponta, dir = +1 (P1) ou -1 (P2).
 static void drawLightningTrail(cv::Mat &view, cv::Point tail, cv::Point head,
                                const cv::Scalar &col, float time, int seed, bool glowEffects)
@@ -237,13 +260,27 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
                          castGlowColor(m.castType(p)), m.castGlow01(p));
 
         const auto &fr = as.wizard[p];
+        const float hit = m.hitFlash01(p);
+
+        // tremor: deslocamento pseudo-aleatorio que diminui junto com o efeito
+        cv::Point wc(xs[p], H / 2);
+        if (hit > 0.f)
+        {
+            const int tick = int(hit * kHitFlashTime * 60.f); // muda ~60x/s enquanto decai
+            wc.x += int(rnd(tick, p * 2 + 1) * 6.f * hit);
+            wc.y += int(rnd(tick, p * 2 + 2) * 3.f * hit);
+        }
+
         if (!fr.empty())
         {
             int f = int(m.time() * 8) % int(fr.size()); // 8 quadros por segundo
-            drawFit(view, fr[f], {xs[p], H / 2});
+            if (hit > 0.f)
+                drawFit(view, tintRed(fr[f], hit), wc);
+            else
+                drawFit(view, fr[f], wc);
         }
         else
-            cv::circle(view, {xs[p], H / 2}, 30,
+            cv::circle(view, wc, 30,
                        p == 0 ? cv::Scalar(255, 200, 80) : cv::Scalar(80, 200, 255), cv::FILLED);
         if (m.hasShield(p))
         {

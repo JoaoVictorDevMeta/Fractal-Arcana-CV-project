@@ -3,6 +3,7 @@
 #include <vector>
 
 constexpr float kCastGlowTime = 0.35f; // duracao (s) do brilho ao lancar feitico
+constexpr float kHitFlashTime = 0.30f; // duracao (s) do flash vermelho/tremor ao levar dano
 
 struct Player
 {
@@ -13,6 +14,7 @@ struct Player
     int shieldBlocks = 0;
     float castGlow = 0.f;                   // tempo restante do brilho de lancamento
     SpellType castType = SpellType::Nenhum; // ultimo feitico lancado (define a cor)
+    float hitFlash = 0.f;                   // tempo restante do efeito de dano
 };
 
 struct Projectile
@@ -44,6 +46,7 @@ public:
     bool hasShield(int p) const { return players[p].shieldBlocks > 0; }
     float castGlow01(int p) const { return players[p].castGlow / kCastGlowTime; }
     SpellType castType(int p) const { return players[p].castType; }
+    float hitFlash01(int p) const { return players[p].hitFlash / kHitFlashTime; }
     const std::vector<Projectile> &projectiles() const { return proj_; }
     MatchState state() const { return state_; }
     float time() const { return time_; }
