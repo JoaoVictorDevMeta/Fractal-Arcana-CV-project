@@ -41,6 +41,35 @@ void drawSprite(cv::Mat &dst, const cv::Mat &spr, cv::Point center)
     cv::Rect srcRoi(clip.x - want.x, clip.y - want.y, clip.width, clip.height);
     cv::Mat s = spr(srcRoi);
 
+    // Caminho rapido: BGRA -> BGR em 8 bits, com blend inteiro, sem converter para float.
+    if (s.type() == CV_8UC4 && d.type() == CV_8UC3)
+    {
+        for (int y = 0; y < s.rows; ++y)
+        {
+            const uchar *sp = s.ptr<uchar>(y);
+            uchar *dp = d.ptr<uchar>(y);
+            for (int x = 0; x < s.cols; ++x, sp += 4, dp += 3)
+            {
+                const int a = sp[3];
+                if (a == 0)
+                    continue;
+                if (a == 255)
+                {
+                    dp[0] = sp[0];
+                    dp[1] = sp[1];
+                    dp[2] = sp[2];
+                }
+                else
+                {
+                    dp[0] = uchar(dp[0] + ((sp[0] - dp[0]) * a) / 255);
+                    dp[1] = uchar(dp[1] + ((sp[1] - dp[1]) * a) / 255);
+                    dp[2] = uchar(dp[2] + ((sp[2] - dp[2]) * a) / 255);
+                }
+            }
+        }
+        return;
+    }
+
     if (s.channels() == 4)
     {
         std::vector<cv::Mat> ch;
