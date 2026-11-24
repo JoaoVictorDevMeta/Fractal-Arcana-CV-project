@@ -81,7 +81,8 @@ private:
                          const cv::Scalar &fill,
                          const cv::Scalar &borderOuter,
                          const cv::Scalar &borderInner,
-                         bool highlight = false) const;
+                         bool highlight = false,
+                         const cv::Scalar &cornerCol = cv::Scalar(70, 215, 245)) const;
 
     void drawTitleScreen_(cv::Mat &frame) const;
     void updateManaBlocks_(const cv::Size &size, double dt);
