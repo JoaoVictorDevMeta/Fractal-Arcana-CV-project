@@ -4,6 +4,7 @@
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <cstdio>
 
 namespace
@@ -1109,29 +1110,78 @@ void MenuUI::drawInfoScreen_(cv::Mat &frame) const
     putCenteredText(frame, "Voltar", btnBackRect_, cv::FONT_HERSHEY_DUPLEX, 0.85, cv::Scalar(240, 240, 250), 2);
 }
 
+// Halo branco atras de uma caixa (mesmo efeito dos botoes do menu): fraco em repouso,
+// forte e pulsando de leve no hover/selecao. A mascara borrada fica em cache por tamanho,
+// entao nao ha GaussianBlur por frame.
+static void addRectGlow(cv::Mat &frame, const cv::Rect &r, float hv, float time)
+{
+    const float k = (0.30f + 0.70f * hv) * (1.f + 0.08f * hv * std::sin(time * 7.f));
+    const int pad = std::max(14, cvRound(r.width * 0.09));
+    const cv::Rect big(r.x - pad, r.y - pad, r.width + 2 * pad, r.height + 2 * pad);
+    const cv::Rect vis = big & cv::Rect(0, 0, frame.cols, frame.rows);
+    if (vis.empty())
+        return;
+
+    static std::map<std::pair<int, int>, cv::Mat> cache;
+    const std::pair<int, int> key(r.width, r.height);
+    auto it = cache.find(key);
+    if (it == cache.end())
+    {
+        if (cache.size() > 16)
+            cache.clear();
+        cv::Mat m = cv::Mat::zeros(big.size(), CV_8U);
+        cv::rectangle(m, cv::Rect(pad, pad, r.width, r.height), cv::Scalar(255), cv::FILLED);
+        cv::GaussianBlur(m, m, cv::Size(0, 0), pad * 0.45);
+        it = cache.emplace(key, std::move(m)).first;
+    }
+
+    cv::Mat g, g3;
+    it->second(cv::Rect(vis.x - big.x, vis.y - big.y, vis.width, vis.height))
+        .convertTo(g, CV_8U, 0.9 * std::min(1.f, k));
+    cv::cvtColor(g, g3, cv::COLOR_GRAY2BGR);
+    cv::Mat roi = frame(vis);
+    cv::add(roi, g3, roi);
+}
+
 void MenuUI::drawCharacterSelect_(cv::Mat &frame) const
 {
     std::string header = "ESCOLHA SEU MAGO - P1: " + characterName(chosen_[0]) +
                          " | P2: " + characterName(chosen_[1]);
+    // Paleta roxa suave (mesma dos botoes do menu inicial)
+    const cv::Scalar softPurple(230, 170, 200);  // texto
+    const cv::Scalar panelBorder(200, 120, 160); // borda externa
+    const cv::Scalar panelInner(110, 60, 90);    // borda interna
+    const cv::Scalar hotPurple(255, 210, 235);   // borda em hover/selecao
+
     putCenteredText(frame, header, {0, 12, frame.cols, 44},
-                    cv::FONT_HERSHEY_DUPLEX, 0.72, cv::Scalar(140, 245, 255), 2);
+                    cv::FONT_HERSHEY_DUPLEX, 0.72, softPurple, 2);
+
+    // intensidade de hover de cada card: varinha desenhando, mouse em cima ou escolhido
+    auto cardHover = [&](size_t i)
+    {
+        const auto &c = chars_[i];
+        float hv = std::max(c.drawProgress[0], c.drawProgress[1]);
+        if (chosen_[0] == static_cast<int>(i) || chosen_[1] == static_cast<int>(i) ||
+            c.cardRect.contains(mousePos_))
+            hv = 1.f;
+        return std::clamp(hv, 0.f, 1.f);
+    };
+
+    // halos primeiro (todos), para ficarem atras dos cards vizinhos
+    if (glowEnabled_)
+        for (size_t i = 0; i < chars_.size(); ++i)
+            addRectGlow(frame, chars_[i].cardRect, cardHover(i), titleTime_);
 
     for (size_t i = 0; i < chars_.size(); ++i)
     {
         const auto &c = chars_[i];
         bool p1Sel = (chosen_[0] == static_cast<int>(i));
         bool p2Sel = (chosen_[1] == static_cast<int>(i));
-        bool anyProg = (c.drawProgress[0] > 0.02f || c.drawProgress[1] > 0.02f || p1Sel || p2Sel);
 
-        cv::Scalar borderCol = cv::Scalar(90, 175, 210);
-        if (p1Sel && p2Sel)
-            borderCol = cv::Scalar(255, 255, 100);
-        else if (p1Sel)
-            borderCol = cv::Scalar(255, 140, 20);
-        else if (p2Sel)
-            borderCol = cv::Scalar(60, 255, 80);
-
-        drawPixelPanel_(frame, c.cardRect, cv::Scalar(20, 18, 30), borderCol, cv::Scalar(110, 85, 45), anyProg);
+        const float hv = cardHover(i);
+        const cv::Scalar borderCol = panelBorder * (1.f - hv) + hotPurple * hv;
+        drawPixelPanel_(frame, c.cardRect, cv::Scalar(20, 18, 30), borderCol, panelInner,
+                        false, softPurple);
 
         // Retrato do personagem dentro do card
         cv::Rect imgBox(c.cardRect.x + 10, c.cardRect.y + 10,
@@ -1169,7 +1219,7 @@ void MenuUI::drawCharacterSelect_(cv::Mat &frame) const
 
         // Nome do personagem
         cv::Rect nameBox(c.cardRect.x + 6, c.cardRect.br().y - 24, c.cardRect.width - 12, 22);
-        putCenteredText(frame, c.name, nameBox, cv::FONT_HERSHEY_SIMPLEX, 0.52, cv::Scalar(255, 248, 220), 1);
+        putCenteredText(frame, c.name, nameBox, cv::FONT_HERSHEY_SIMPLEX, 0.52, softPurple, 1);
 
         // Badges P1 / P2 se escolhido
         if (p1Sel)
@@ -1191,12 +1241,17 @@ void MenuUI::drawCharacterSelect_(cv::Mat &frame) const
     if (screen_ == GameScreen::DuelReady)
     {
         cv::Rect banner(frame.cols / 5, frame.rows / 2 - 42, (frame.cols * 3) / 5, 84);
-        drawPixelPanel_(frame, banner, cv::Scalar(25, 20, 40), cv::Scalar(80, 255, 160), cv::Scalar(220, 190, 60), true);
+        if (glowEnabled_)
+            addRectGlow(frame, banner, 1.f, titleTime_);
+        drawPixelPanel_(frame, banner, cv::Scalar(25, 20, 40), hotPurple, panelInner, false, softPurple);
         std::string msg = "PRONTOS! " + characterName(chosen_[0]) + " vs " + characterName(chosen_[1]);
-        putCenteredText(frame, msg, banner, cv::FONT_HERSHEY_DUPLEX, 0.75, cv::Scalar(160, 255, 190), 2);
+        putCenteredText(frame, msg, banner, cv::FONT_HERSHEY_DUPLEX, 0.75, softPurple, 2);
 
-        float bProg = std::max(backHover_[0], backHover_[1]);
-        drawPixelPanel_(frame, btnBackRect_, cv::Scalar(35, 25, 40), cv::Scalar(90, 190, 230), cv::Scalar(80, 70, 110), bProg > 0.05f);
-        putCenteredText(frame, "Menu", btnBackRect_, cv::FONT_HERSHEY_DUPLEX, 0.8, cv::Scalar(240, 240, 250), 2);
+        const float bHv = std::clamp(std::max(backHover_[0], backHover_[1]), 0.f, 1.f);
+        if (glowEnabled_)
+            addRectGlow(frame, btnBackRect_, bHv, titleTime_);
+        drawPixelPanel_(frame, btnBackRect_, cv::Scalar(35, 25, 40),
+                        panelBorder * (1.f - bHv) + hotPurple * bHv, panelInner, false, softPurple);
+        putCenteredText(frame, "Menu", btnBackRect_, cv::FONT_HERSHEY_DUPLEX, 0.8, softPurple, 2);
     }
 }

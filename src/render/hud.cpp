@@ -272,6 +272,53 @@ static void drawSpellGlow(cv::Mat &view, cv::Point c, int radius,
     addGlow(view, c, radius, 0.5, 0.4, col, 0.8 * pulse);
 }
 
+// Faiscas brilhosas expelidas pelo feitico em voo, com a cor media do sprite.
+// Sem estado: cada faisca e recalculada a partir do tempo da partida e do progresso do
+// projetil (posicao onde ele estava quando a faisca nasceu), entao nao precisa de lista
+// de particulas e acompanha pausa/reset sozinha. Desenha na camada 'layer' (aditiva).
+static void drawProjectileSparks(cv::Mat &layer, const Projectile &pr, int xFrom, int xTo,
+                                 int H, int sw, int sh, const cv::Scalar &col, float now)
+{
+    constexpr float kRate = 70.f; // faiscas por segundo
+    constexpr float kLife = 0.6f; // duracao de cada faisca (s)
+    const int count = int(kRate * kLife);
+    const int dir = (xTo >= xFrom) ? 1 : -1;
+    const int base = int(std::floor(now * kRate));
+    const int salt = pr.owner * 31 + int(pr.type) * 7;
+    const cv::Scalar white(255, 255, 255);
+
+    for (int j = 0; j < count; ++j)
+    {
+        const int n = base - j;
+        if (n < 0)
+            continue;
+        const float age = now - n / kRate;
+        if (age < 0.f || age >= kLife || pr.travelTime <= 0.f)
+            continue;
+        const float tEmit = pr.t - age / pr.travelTime; // onde o projetil estava ao nascer
+        if (tEmit < 0.f)
+            continue;
+
+        const float life01 = age / kLife;
+        const float u1 = (rnd(n, salt + 1) + 1.f) * 0.5f;
+        const float u2 = (rnd(n, salt + 2) + 1.f) * 0.5f;
+
+        // nasce na traseira do feitico e e jogada para tras/para os lados
+        const float ox = xFrom + (xTo - xFrom) * tEmit - dir * sw * 0.25f;
+        const float oy = H / 2 + rnd(n, salt + 3) * sh * 0.35f;
+        const float vx = -dir * (40.f + 90.f * u1);
+        const float vy = rnd(n, salt + 4) * 70.f;
+        const cv::Point pt(cvRound(ox + vx * age), cvRound(oy + vy * age + 25.f * age * age));
+
+        const float fade = (1.f - life01) * (0.65f + 0.35f * std::sin(now * 28.f + n));
+        const int radius = 1 + int(2.f * (1.f - life01) * (0.5f + 0.5f * u2));
+
+        cv::circle(layer, pt, radius, col * (0.75f * fade), cv::FILLED, cv::LINE_AA);
+        cv::circle(layer, pt, std::max(0, radius - 1), (col * 0.3 + white * 0.7) * fade,
+                   cv::FILLED, cv::LINE_AA); // nucleo quase branco
+    }
+}
+
 void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
 {
     if (!as.background.empty())
@@ -331,6 +378,8 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
         }
     }
 
+    cv::Mat sparkLayer; // camada aditiva das faiscas (criada so se houver projeteis)
+
     for (const Projectile &pr : m.projectiles())
     {
         int x = xs[pr.owner] + int((xs[1 - pr.owner] - xs[pr.owner]) * pr.t);
@@ -357,7 +406,15 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
                 const double fit = spr->rows > H - 4 ? double(H - 4) / spr->rows : 1.0;
                 const int glowR = std::min(cvRound(std::max(spr->cols, spr->rows) * fit * 0.7),
                                            cvRound(H * 0.5));
-                drawSpellGlow(view, {x, H / 2}, glowR, spriteGlowColor(*spr), m.time());
+                const cv::Scalar sprCol = spriteGlowColor(*spr);
+                drawSpellGlow(view, {x, H / 2}, glowR, sprCol, m.time());
+
+                // faiscas brilhosas com a cor media do sprite
+                if (sparkLayer.empty())
+                    sparkLayer = cv::Mat::zeros(view.size(), view.type());
+                drawProjectileSparks(sparkLayer, pr, xs[pr.owner], xs[1 - pr.owner], H,
+                                     cvRound(spr->cols * fit), cvRound(spr->rows * fit),
+                                     sprCol, m.time());
             }
 
             if (pr.type == SpellType::AtaqueMedio) // Raio: corta a arena inteira
@@ -373,6 +430,9 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
         else
             cv::circle(view, {x, H / 2}, 10 + int(pr.damage / 3), {80, 80, 255}, cv::FILLED);
     }
+
+    if (!sparkLayer.empty())
+        cv::add(view, sparkLayer, view);
 
     if (m.state() != MatchState::Running)
         cv::putText(view, m.state() == MatchState::Player0Won ? "JOGADOR 1 VENCEU" : "JOGADOR 2 VENCEU",
