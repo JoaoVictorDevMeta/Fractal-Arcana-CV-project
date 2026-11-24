@@ -111,6 +111,7 @@ int main(int argc, char **argv)
     bool paused = false;
     cv::Mat frame;
     FrameTimer frameTimer;
+    double matchDt = 1.0 / 30.0; // dt suavizado: movimento dos feiticos fica regular
 
     for (;;)
     {
@@ -168,7 +169,11 @@ int main(int argc, char **argv)
                 assetsLoaded = true;
             }
             if (!paused)
-                match.update(dt);
+            {
+                // Media exponencial do dt (com teto): evita saltos quando um frame demora mais.
+                matchDt += (std::min(dt, 0.1) - matchDt) * 0.2;
+                match.update(matchDt);
+            }
         }
         else
         {

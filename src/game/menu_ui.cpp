@@ -947,29 +947,57 @@ void MenuUI::drawTitleScreen_(cv::Mat &frame) const
 {
     drawManaBlocks_(frame);
 
-    // Logo "Fractal Arcana" com halo roxo suave.
+    // Logo "Fractal Arcana" com halo roxo suave, pulsando (cresce e encolhe).
     if (!titleLogoNorm_.empty())
     {
+        constexpr float kAmp = 0.06f;
+        const float breathe = 1.f + kAmp * std::sin(titleTime_ * 2.0f);
+
+        // A escala e aplicada com warpAffine em subpixel, num quadro de tamanho FIXO
+        // (imagem + margem para o maximo crescimento). Assim nem o tamanho nem a posicao
+        // sao arredondados a cada frame, e o logo nao treme.
+        auto scaledCanvas = [&](const cv::Mat &src, cv::Point &topLeft) -> cv::Mat
+        {
+            const int padX = cvCeil(src.cols * kAmp) + 2;
+            const int padY = cvCeil(src.rows * kAmp) + 2;
+            const cv::Size canvas(src.cols + 2 * padX, src.rows + 2 * padY);
+            const double cx = src.cols * 0.5, cy = src.rows * 0.5;
+            const double M[2][3] = {
+                {breathe, 0.0, (cx + padX) - breathe * cx},
+                {0.0, breathe, (cy + padY) - breathe * cy}};
+            cv::Mat out;
+            cv::warpAffine(src, out, cv::Mat(2, 3, CV_64F, (void *)M), canvas,
+                           cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar::all(0));
+            topLeft = cv::Point(-padX, -padY);
+            return out;
+        };
+
         const cv::Point logoTL = titleFrameRect_.tl();
+
         if (glowEnabled_ && !titleLogoGlow_.empty())
         {
-            const float pulse = 0.82f + 0.12f * std::sin(titleTime_ * 2.4f);
-            const cv::Point glowTL = logoTL - cv::Point(titleLogoGlowPad_, titleLogoGlowPad_);
-            const cv::Rect glowRect(glowTL, titleLogoGlow_.size());
+            const float pulse = 0.82f + 0.12f * std::sin(titleTime_ * 2.0f);
+            cv::Point off;
+            const cv::Mat glowImg = scaledCanvas(titleLogoGlow_, off);
+            // O glow original ja comeca em logoTL - glowPad.
+            const cv::Point glowTL = logoTL - cv::Point(titleLogoGlowPad_, titleLogoGlowPad_) + off;
+            const cv::Rect glowRect(glowTL, glowImg.size());
             const cv::Rect visible = glowRect & cv::Rect(0, 0, frame.cols, frame.rows);
             if (!visible.empty())
             {
                 cv::Mat glow;
-                titleLogoGlow_(cv::Rect(visible.x - glowRect.x, visible.y - glowRect.y,
-                                        visible.width, visible.height))
+                glowImg(cv::Rect(visible.x - glowRect.x, visible.y - glowRect.y,
+                                 visible.width, visible.height))
                     .convertTo(glow, CV_8UC3, pulse * 0.72);
                 cv::Mat roi = frame(visible);
                 cv::add(roi, glow, roi);
             }
         }
 
-        drawSprite(frame, titleLogoNorm_,
-                   logoTL + cv::Point(titleLogoNorm_.cols / 2, titleLogoNorm_.rows / 2));
+        cv::Point off;
+        const cv::Mat logoImg = scaledCanvas(titleLogoNorm_, off);
+        const cv::Point tl = logoTL + off;
+        drawSprite(frame, logoImg, tl + cv::Point(logoImg.cols / 2, logoImg.rows / 2));
     }
 
     // Estilo dos botoes: painel escuro, borda roxa, texto roxo suave

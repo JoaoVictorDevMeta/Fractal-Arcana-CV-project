@@ -3,23 +3,46 @@
 #include "game/match.h"
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
+#include <array>
+#include <cstdint>
+#include <map>
 #include <cmath>
 #include <string>
 #include <vector>
 
 // Reduz o sprite se ele for mais alto que a arena (em vez de cortar).
-static void drawFit(cv::Mat &view, const cv::Mat &spr, cv::Point center)
+// O resultado fica em cache: o resize deixa de acontecer a cada frame.
+static const cv::Mat &fitSprite(const cv::Mat &view, const cv::Mat &spr)
 {
     const int maxH = view.rows - 4;
-    if (maxH > 0 && spr.rows > maxH)
-    {
-        cv::Mat r;
-        const double s = double(maxH) / spr.rows;
-        cv::resize(spr, r, {}, s, s, cv::INTER_AREA);
-        drawSprite(view, r, center);
-    }
-    else
-        drawSprite(view, spr, center);
+    if (maxH <= 0 || spr.empty() || spr.rows <= maxH)
+        return spr;
+
+    // chave: endereco + tamanho + amostra de pixels (protege contra recarga de assets)
+    long long sample = 0;
+    const size_t bytes = spr.total() * spr.elemSize();
+    if (spr.isContinuous() && bytes > 0)
+        for (int i = 0; i < 16; ++i)
+            sample = sample * 131 + spr.data[(bytes - 1) * size_t(i) / 15];
+    const std::array<long long, 5> key = {(long long)(std::uintptr_t)spr.data,
+                                          spr.rows, spr.cols, maxH, sample};
+
+    static std::map<std::array<long long, 5>, cv::Mat> cache;
+    auto it = cache.find(key);
+    if (it != cache.end())
+        return it->second;
+    if (cache.size() > 64)
+        cache.clear();
+
+    cv::Mat r;
+    const double sc = double(maxH) / spr.rows;
+    cv::resize(spr, r, {}, sc, sc, cv::INTER_AREA);
+    return cache.emplace(key, std::move(r)).first->second;
+}
+
+static void drawFit(cv::Mat &view, const cv::Mat &spr, cv::Point center)
+{
+    drawSprite(view, fitSprite(view, spr), center);
 }
 
 static float rnd(int a, int b) // ruido deterministico em [-1, 1]
@@ -149,6 +172,46 @@ static cv::Scalar castGlowColor(SpellType t)
     }
 }
 
+// Mascara de brilho (branca, ja desfocada) em cache por raio. Evita um GaussianBlur
+// grande a cada frame; a cor e a intensidade sao aplicadas depois com uma multiplicacao.
+static const cv::Mat &glowMask(int radius, double circleFrac, double sigmaFrac)
+{
+    static std::map<std::array<int, 3>, cv::Mat> cache;
+    const std::array<int, 3> key = {radius, int(circleFrac * 100), int(sigmaFrac * 100)};
+    auto it = cache.find(key);
+    if (it != cache.end())
+        return it->second;
+    if (cache.size() > 32)
+        cache.clear();
+
+    const int pad = radius * 2;
+    cv::Mat m = cv::Mat::zeros(2 * pad, 2 * pad, CV_8UC3);
+    cv::circle(m, {pad, pad}, cvRound(radius * circleFrac), cv::Scalar::all(255),
+               cv::FILLED, cv::LINE_AA);
+    cv::GaussianBlur(m, m, {0, 0}, radius * sigmaFrac);
+    return cache.emplace(key, std::move(m)).first->second;
+}
+
+// Soma aditiva do brilho em cache, tingido por 'col' * intensity.
+static void addGlow(cv::Mat &view, cv::Point c, int radius, double circleFrac, double sigmaFrac,
+                    const cv::Scalar &col, double intensity)
+{
+    if (radius <= 0 || intensity <= 0.0)
+        return;
+    const int pad = radius * 2;
+    const cv::Rect roi(c.x - pad, c.y - pad, 2 * pad, 2 * pad);
+    const cv::Rect vis = roi & cv::Rect(0, 0, view.cols, view.rows);
+    if (vis.empty())
+        return;
+
+    const cv::Mat &mask = glowMask(radius, circleFrac, sigmaFrac);
+    cv::Mat glow;
+    cv::multiply(mask(cv::Rect(vis.x - roi.x, vis.y - roi.y, vis.width, vis.height)),
+                 col * intensity, glow, 1.0 / 255.0);
+    cv::Mat sub = view(vis);
+    cv::add(sub, glow, sub);
+}
+
 // Brilho aditivo ao redor do mago + anel que se expande. g01: 1 = recem lancado, 0 = apagado.
 static void drawCastGlow(cv::Mat &view, cv::Point c, int radius,
                          const cv::Scalar &col, float g01)
@@ -157,18 +220,7 @@ static void drawCastGlow(cv::Mat &view, cv::Point c, int radius,
     if (g01 <= 0.f || radius <= 0)
         return;
 
-    const int pad = radius * 2;
-    cv::Rect roi(c.x - pad, c.y - pad, 2 * pad, 2 * pad);
-    roi &= cv::Rect(0, 0, view.cols, view.rows);
-    if (roi.empty())
-        return;
-
-    cv::Mat glow = cv::Mat::zeros(roi.size(), view.type());
-    cv::circle(glow, c - roi.tl(), cvRound(radius * 0.6), col * (0.9 * g01),
-               cv::FILLED, cv::LINE_AA);
-    cv::GaussianBlur(glow, glow, {0, 0}, radius * 0.3);
-    cv::Mat sub = view(roi);
-    cv::add(sub, glow, sub);
+    addGlow(view, c, radius, 0.6, 0.3, col, 0.9 * g01);
 
     // anel que cresce enquanto o brilho some
     const int ringR = cvRound(radius * (0.35 + 0.65 * (1.f - g01)));
@@ -217,19 +269,7 @@ static void drawSpellGlow(cv::Mat &view, cv::Point c, int radius,
     if (radius <= 0)
         return;
     const double pulse = 0.65 + 0.35 * std::sin(time * 14.0);
-
-    const int pad = radius * 2;
-    cv::Rect roi(c.x - pad, c.y - pad, 2 * pad, 2 * pad);
-    roi &= cv::Rect(0, 0, view.cols, view.rows);
-    if (roi.empty())
-        return;
-
-    cv::Mat glow = cv::Mat::zeros(roi.size(), view.type());
-    cv::circle(glow, c - roi.tl(), cvRound(radius * 0.5), col * (0.8 * pulse),
-               cv::FILLED, cv::LINE_AA);
-    cv::GaussianBlur(glow, glow, {0, 0}, radius * 0.4);
-    cv::Mat sub = view(roi);
-    cv::add(sub, glow, sub);
+    addGlow(view, c, radius, 0.5, 0.4, col, 0.8 * pulse);
 }
 
 void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
@@ -275,7 +315,7 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
         {
             int f = int(m.time() * 8) % int(fr.size()); // 8 quadros por segundo
             if (hit > 0.f)
-                drawFit(view, tintRed(fr[f], hit), wc);
+                drawSprite(view, tintRed(fitSprite(view, fr[f]), hit), wc);
             else
                 drawFit(view, fr[f], wc);
         }
