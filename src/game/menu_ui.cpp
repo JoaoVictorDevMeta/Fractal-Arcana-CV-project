@@ -220,6 +220,10 @@ void MenuUI::ensureBackground_(const cv::Size &size)
 void MenuUI::loadButtonImages_()
 {
     btnLoaded_ = true;
+    // Botoes desenhados como paineis (mesmo estilo da caixa do titulo): imagens desativadas.
+    btnImagesOk_ = false;
+    return;
+
     static const char *files[kBtnCount] = {
         "assets/button_jogar.png",
         "assets/button_info.png",
@@ -429,7 +433,8 @@ void MenuUI::drawPixelPanel_(cv::Mat &img, const cv::Rect &r,
                              const cv::Scalar &fill,
                              const cv::Scalar &borderOuter,
                              const cv::Scalar &borderInner,
-                             bool highlight) const
+                             bool highlight,
+                             const cv::Scalar &cornerCol) const
 {
     cv::rectangle(img, r, fill, cv::FILLED);
 
@@ -440,7 +445,6 @@ void MenuUI::drawPixelPanel_(cv::Mat &img, const cv::Rect &r,
 
     // Cantoneiras decorativas nos 4 cantos
     const int cLen = 12;
-    const cv::Scalar cornerCol(70, 215, 245);
     // Top-left
     cv::line(img, {r.x, r.y}, {r.x + cLen, r.y}, cornerCol, 3);
     cv::line(img, {r.x, r.y}, {r.x, r.y + cLen}, cornerCol, 3);
@@ -861,40 +865,83 @@ void MenuUI::drawTitleScreen_(cv::Mat &frame) const
 {
     drawManaBlocks_(frame);
 
+    // Estilo unico (titulo e botoes): painel escuro, borda ciano/dourada, texto roxo suave
+    const cv::Scalar panelFill(28, 22, 40);
+    const cv::Scalar panelBorder(200, 120, 160); // BGR: roxo da borda
+    const cv::Scalar panelInner(110, 60, 90);    // BGR: roxo escuro (borda interna)
+    const cv::Scalar titlePurple(230, 170, 200); // BGR: roxo suave
+
+    // Painel de botao: halo branco atras (fraco em repouso, forte e pulsando no hover;
+    // desligado junto com os demais brilhos) + painel com borda roxa que clareia no hover.
+    auto drawButtonPanel = [&](const cv::Rect &r, int slot)
+    {
+        const float hv = btnHover_[slot];
+
+        if (glowEnabled_)
+        {
+            const float k = (0.30f + 0.70f * hv) * (1.f + 0.08f * hv * std::sin(titleTime_ * 7.f));
+            const int pad = std::max(14, cvRound(r.width * 0.09));
+            const cv::Rect big(r.x - pad, r.y - pad, r.width + 2 * pad, r.height + 2 * pad);
+            const cv::Rect vis = big & cv::Rect(0, 0, frame.cols, frame.rows);
+            if (!vis.empty())
+            {
+                cv::Mat glow = cv::Mat::zeros(big.size(), frame.type());
+                cv::rectangle(glow, cv::Rect(pad, pad, r.width, r.height),
+                              cv::Scalar::all(255.0 * 0.9 * std::min(1.f, k)), cv::FILLED);
+                cv::GaussianBlur(glow, glow, cv::Size(0, 0), pad * 0.45);
+                cv::Mat dstRoi = frame(vis);
+                cv::add(dstRoi, glow(cv::Rect(vis.x - big.x, vis.y - big.y, vis.width, vis.height)), dstRoi);
+            }
+        }
+
+        const cv::Scalar hot(255, 210, 235);
+        const cv::Scalar border = panelBorder * (1.f - hv) + hot * hv;
+        drawPixelPanel_(frame, r, panelFill, border, panelInner, false, titlePurple);
+    };
+
+    // Caixa com o titulo "Fractal Arcana"
+    if (!titleFrameRect_.empty())
+    {
+        drawPixelPanel_(frame, titleFrameRect_, panelFill, panelBorder, panelInner, false, titlePurple);
+
+        // escolhe a escala para o texto caber na caixa (80% da largura, 50% da altura)
+        const std::string title = "Fractal Arcana";
+        const int face = cv::FONT_HERSHEY_TRIPLEX;
+        const int thick = 2;
+        int baseline = 0;
+        const cv::Size ref = cv::getTextSize(title, face, 1.0, thick, &baseline);
+        const double scale = std::min(titleFrameRect_.width * 0.80 / ref.width,
+                                      titleFrameRect_.height * 0.50 / ref.height);
+        putCenteredText(frame, title, titleFrameRect_, face, scale,
+                        titlePurple, thick);
+    }
+
     // Botao esquerdo: "Jogar"
     float pProg = std::max(playHover_[0], playHover_[1]);
     if (!drawImageButton_(frame, kBtnPlay, btnPlayRect_, pProg, cv::Scalar(80, 255, 140)))
     {
-        drawPixelPanel_(frame, btnPlayRect_,
-                        cv::Scalar(25, 48, 32),
-                        cv::Scalar(80, 220, 120),
-                        cv::Scalar(50, 130, 75),
-                        pProg > 0.05f);
+        drawButtonPanel(btnPlayRect_, 0);
         if (pProg > 0.01f)
         {
             int barW = cvRound(btnPlayRect_.width * pProg);
             cv::rectangle(frame, {btnPlayRect_.x, btnPlayRect_.br().y - 6},
                           {btnPlayRect_.x + barW, btnPlayRect_.br().y}, cv::Scalar(80, 255, 140), cv::FILLED);
         }
-        putCenteredText(frame, "Jogar", btnPlayRect_, cv::FONT_HERSHEY_DUPLEX, 0.95, cv::Scalar(220, 255, 225), 2);
+        putCenteredText(frame, "Jogar", btnPlayRect_, cv::FONT_HERSHEY_DUPLEX, 0.95, titlePurple, 2);
     }
 
     // Botao direito: "info"
     float iProg = std::max(infoHover_[0], infoHover_[1]);
     if (!drawImageButton_(frame, kBtnInfo, btnInfoRect_, iProg, cv::Scalar(120, 230, 255)))
     {
-        drawPixelPanel_(frame, btnInfoRect_,
-                        cv::Scalar(28, 26, 48),
-                        cv::Scalar(220, 175, 70),
-                        cv::Scalar(125, 95, 40),
-                        iProg > 0.05f);
+        drawButtonPanel(btnInfoRect_, 1);
         if (iProg > 0.01f)
         {
             int barW = cvRound(btnInfoRect_.width * iProg);
             cv::rectangle(frame, {btnInfoRect_.x, btnInfoRect_.br().y - 6},
                           {btnInfoRect_.x + barW, btnInfoRect_.br().y}, cv::Scalar(120, 230, 255), cv::FILLED);
         }
-        putCenteredText(frame, "info", btnInfoRect_, cv::FONT_HERSHEY_DUPLEX, 0.95, cv::Scalar(255, 240, 195), 2);
+        putCenteredText(frame, "info", btnInfoRect_, cv::FONT_HERSHEY_DUPLEX, 0.95, titlePurple, 2);
     }
 
     // Botao de brilhos (ligado/desligado)
@@ -903,11 +950,7 @@ void MenuUI::drawTitleScreen_(cv::Mat &frame) const
     if (!drawImageButton_(frame, on ? kBtnEffectsOn : kBtnEffectsOff, btnGlowRect_, gProg,
                           cv::Scalar(255, 180, 240)))
     {
-        drawPixelPanel_(frame, btnGlowRect_,
-                        on ? cv::Scalar(40, 30, 56) : cv::Scalar(34, 34, 34),
-                        on ? cv::Scalar(255, 150, 220) : cv::Scalar(130, 130, 130),
-                        on ? cv::Scalar(140, 80, 120) : cv::Scalar(80, 80, 80),
-                        gProg > 0.05f);
+        drawButtonPanel(btnGlowRect_, 2);
         if (gProg > 0.01f)
         {
             int barW = cvRound(btnGlowRect_.width * gProg);
@@ -916,7 +959,7 @@ void MenuUI::drawTitleScreen_(cv::Mat &frame) const
         }
         putCenteredText(frame, on ? "Brilhos: LIGADOS" : "Brilhos: DESLIGADOS", btnGlowRect_,
                         cv::FONT_HERSHEY_DUPLEX, 0.7,
-                        on ? cv::Scalar(255, 220, 245) : cv::Scalar(190, 190, 190), 1);
+                        on ? titlePurple : cv::Scalar(150, 130, 150), 1);
     }
 }
 
