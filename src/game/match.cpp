@@ -30,9 +30,14 @@ bool Match::cast(int p, Shape s)
 
 void Match::update(double dtd)
 {
+    const float dt = static_cast<float>(dtd);
+
+    // o efeito de dano termina mesmo depois do golpe final
+    for (Player &pl : players)
+        pl.hitFlash = std::max(0.f, pl.hitFlash - dt);
+
     if (state_ != MatchState::Running)
         return;
-    const float dt = static_cast<float>(dtd);
 
     time_ += dt;
 
@@ -67,6 +72,7 @@ void Match::update(double dtd)
         else
         {
             target.health -= proj_[i].damage;
+            target.hitFlash = kHitFlashTime;
         }
         proj_.erase(proj_.begin() + i);
     }

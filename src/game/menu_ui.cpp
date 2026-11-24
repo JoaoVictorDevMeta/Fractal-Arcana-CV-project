@@ -1,4 +1,5 @@
 #include "game/menu_ui.h"
+#include "render/sprites.h"
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
@@ -18,6 +19,40 @@ namespace
                       box.y + (box.height + ts.height) / 2);
         cv::putText(img, text, org + cv::Point(2, 2), fontFace, scale, cv::Scalar(10, 8, 15), thickness + 1, cv::LINE_8);
         cv::putText(img, text, org, fontFace, scale, fg, thickness, cv::LINE_8);
+    }
+
+    // Redimensiona BGRA com alfa pre-multiplicado (evita bordas escuras/claras nas transparencias)
+    cv::Mat resizeBGRA(const cv::Mat &src, double scale)
+    {
+        cv::Mat f;
+        src.convertTo(f, CV_32F, 1.0 / 255.0);
+        std::vector<cv::Mat> ch;
+        cv::split(f, ch);
+        for (int i = 0; i < 3; ++i)
+            ch[i] = ch[i].mul(ch[3]);
+        cv::merge(ch, f);
+        cv::resize(f, f, cv::Size(), scale, scale, cv::INTER_AREA);
+        cv::split(f, ch);
+        const cv::Mat a = cv::max(ch[3], 1e-4);
+        for (int i = 0; i < 3; ++i)
+            cv::divide(ch[i], a, ch[i]);
+        cv::merge(ch, f);
+        cv::Mat out;
+        f.convertTo(out, CV_8U, 255.0);
+
+        // Realce leve de nitidez nos canais de cor (compensa a suavizacao da reducao)
+        if (scale < 1.0)
+        {
+            cv::split(out, ch);
+            for (int i = 0; i < 3; ++i)
+            {
+                cv::Mat blur;
+                cv::GaussianBlur(ch[i], blur, cv::Size(0, 0), 0.9);
+                cv::addWeighted(ch[i], 1.6, blur, -0.6, 0, ch[i]);
+            }
+            cv::merge(ch, out);
+        }
+        return out;
     }
 
     // Gera um retrato pixelado de contingencia caso a imagem ainda nao esteja na pasta assets/
@@ -118,6 +153,7 @@ void MenuUI::setScreen(GameScreen s)
         playHover_[i] = infoHover_[i] = backHover_[i] = glowHover_[i] = 0.f;
         glowLatch_[i] = false;
     }
+    btnHover_[0] = btnHover_[1] = btnHover_[2] = 0.f;
     if (s == GameScreen::CharacterSelect)
     {
         resetSelection();
@@ -175,8 +211,63 @@ void MenuUI::ensureBackground_(const cv::Size &size)
             cv::resize(titleBgCache_, titleBgCache_, size);
     }
 
+    if (!btnLoaded_)
+        loadButtonImages_();
     buildTitleLayout_(size);
     buildCharacterLayout_(size);
+}
+
+void MenuUI::loadButtonImages_()
+{
+    btnLoaded_ = true;
+    static const char *files[kBtnCount] = {
+        "assets/button_jogar.png",
+        "assets/button_info.png",
+        "assets/button_effects_off.png",
+        "assets/button_effects_on.png"};
+
+    btnImagesOk_ = true;
+    for (int i = 0; i < kBtnCount; ++i)
+    {
+        cv::Mat m = cv::imread(files[i], cv::IMREAD_UNCHANGED);
+        if (m.empty())
+        {
+            std::fprintf(stderr, "Aviso: nao carregou %s (usando botoes simples)\n", files[i]);
+            btnImagesOk_ = false;
+            continue;
+        }
+        if (m.depth() == CV_16U)
+            m.convertTo(m, CV_8U, 1.0 / 257.0);
+        if (m.channels() == 1)
+            cv::cvtColor(m, m, cv::COLOR_GRAY2BGRA);
+        else if (m.channels() == 3)
+            cv::cvtColor(m, m, cv::COLOR_BGR2BGRA);
+        btnSrc_[i] = m;
+    }
+    if (!btnImagesOk_)
+        return;
+
+    // Descobre onde esta a moldura (pixels opacos) na imagem do botao "Jogar";
+    // as outras imagens tem a mesma tela, entao usamos a mesma area.
+    const cv::Mat &ref = btnSrc_[kBtnPlay];
+    int minX = ref.cols, minY = ref.rows, maxX = -1, maxY = -1;
+    for (int y = 0; y < ref.rows; ++y)
+    {
+        const cv::Vec4b *row = ref.ptr<cv::Vec4b>(y);
+        for (int x = 0; x < ref.cols; ++x)
+            if (row[x][3] > 60)
+            {
+                minX = std::min(minX, x);
+                maxX = std::max(maxX, x);
+                minY = std::min(minY, y);
+                maxY = std::max(maxY, y);
+            }
+    }
+    if (maxX > minX && maxY > minY)
+        btnInner_ = cv::Rect2f(float(minX) / ref.cols,
+                               float(minY) / ref.rows,
+                               float(maxX - minX + 1) / ref.cols,
+                               float(maxY - minY + 1) / ref.rows);
 }
 
 void MenuUI::buildTitleLayout_(const cv::Size &size)
@@ -208,6 +299,94 @@ void MenuUI::buildTitleLayout_(const cv::Size &size)
     int glowW = btnW * 2 + gap;
     int glowH = std::max(40, btnH * 3 / 4);
     btnGlowRect_ = cv::Rect(w / 2 - glowW / 2, btnY - glowH - std::max(14, h / 40), glowW, glowH);
+
+    // Botoes com imagem: o retangulo de clique/hover passa a ser a moldura visivel,
+    // mantendo a proporcao da arte. Os tres botoes tem o mesmo tamanho.
+    if (!btnImagesOk_)
+        return;
+
+    const cv::Mat &ref = btnSrc_[kBtnPlay];
+    const double innerAspect = (btnInner_.width * ref.cols) / (btnInner_.height * ref.rows);
+
+    // Tres botoes na mesma linha: Jogar | Info | Efeitos
+    const int rowGap = std::clamp(w / 40, 12, 40);
+    int visW = (w * 94 / 100 - 2 * rowGap) / 3;
+    int visH = cvRound(visW / innerAspect);
+    const int maxH = std::max(40, (h * 22) / 100);
+    if (visH > maxH)
+    {
+        visH = maxH;
+        visW = cvRound(visH * innerAspect);
+    }
+    const int rowW = 3 * visW + 2 * rowGap;
+    const int rowX = (w - rowW) / 2;
+    const int imgBtnY = h - visH - std::max(36, h / 11);
+    btnPlayRect_ = cv::Rect(rowX, imgBtnY, visW, visH);
+    btnInfoRect_ = cv::Rect(rowX + visW + rowGap, imgBtnY, visW, visH);
+    btnGlowRect_ = cv::Rect(rowX + 2 * (visW + rowGap), imgBtnY, visW, visH);
+
+    for (int i = 0; i < kBtnCount; ++i)
+    {
+        const double scale = double(visW) / (btnInner_.width * btnSrc_[i].cols);
+        btnNorm_[i] = resizeBGRA(btnSrc_[i], scale);
+
+        // versao "hover": clareia so os canais de cor (o alfa fica igual)
+        std::vector<cv::Mat> ch;
+        cv::split(btnNorm_[i], ch);
+        for (int k = 0; k < 3; ++k)
+            cv::add(ch[k], cv::Scalar(45), ch[k]);
+        cv::merge(ch, btnHot_[i]);
+
+        // halo branco: silhueta (alfa) borrada numa tela maior que a imagem
+        btnGlowPad_ = std::max(14, cvRound(visW * 0.09));
+        const int pad = btnGlowPad_;
+        cv::Mat gm = cv::Mat::zeros(btnNorm_[i].rows + 2 * pad, btnNorm_[i].cols + 2 * pad, CV_8U);
+        ch[3].copyTo(gm(cv::Rect(pad, pad, btnNorm_[i].cols, btnNorm_[i].rows)));
+        cv::GaussianBlur(gm, gm, cv::Size(0, 0), pad * 0.45);
+        gm.convertTo(btnGlow_[i], CV_8U, 1.8); // ganho: o halo fica mais forte perto da borda
+
+        btnOffset_[i] = cv::Point(cvRound(btnInner_.x * btnNorm_[i].cols),
+                                  cvRound(btnInner_.y * btnNorm_[i].rows));
+    }
+}
+
+bool MenuUI::drawImageButton_(cv::Mat &frame, int idx, const cv::Rect &hit,
+                              float prog, const cv::Scalar &barCol) const
+{
+    if (!btnImagesOk_ || btnNorm_[idx].empty())
+        return false;
+
+    const int slot = idx >= kBtnEffectsOn ? 2 : idx;
+    const float hv = btnHover_[slot];
+    const cv::Mat &img = (prog > 0.05f || hv > 0.5f) ? btnHot_[idx] : btnNorm_[idx];
+    const cv::Point tl = hit.tl() - btnOffset_[idx];
+
+    // Halo branco atras do botao: fraco em repouso, forte (e pulsando de leve) no hover.
+    // Desligado junto com os demais brilhos quando "Efeitos" esta OFF.
+    if (glowEnabled_ && !btnGlow_[idx].empty())
+    {
+        const float k = (0.30f + 0.70f * hv) * (1.f + 0.08f * hv * std::sin(titleTime_ * 7.f));
+        const cv::Point gtl = tl - cv::Point(btnGlowPad_, btnGlowPad_);
+        const cv::Rect vis = cv::Rect(gtl, btnGlow_[idx].size()) & cv::Rect(0, 0, frame.cols, frame.rows);
+        if (!vis.empty())
+        {
+            cv::Mat m, m3;
+            btnGlow_[idx](cv::Rect(vis.x - gtl.x, vis.y - gtl.y, vis.width, vis.height)).convertTo(m, CV_8U, k);
+            cv::cvtColor(m, m3, cv::COLOR_GRAY2BGR);
+            cv::Mat roi = frame(vis);
+            cv::add(roi, m3, roi);
+        }
+    }
+
+    drawSprite(frame, img, tl + cv::Point(img.cols / 2, img.rows / 2));
+
+    // barra de progresso de ativacao (varinha parada sobre o botao), logo abaixo da moldura
+    if (prog > 0.01f)
+    {
+        const int barW = cvRound(hit.width * std::min(1.f, prog));
+        cv::rectangle(frame, cv::Rect(hit.x, hit.br().y + 4, barW, 5), barCol, cv::FILLED);
+    }
+    return true;
 }
 
 void MenuUI::buildCharacterLayout_(const cv::Size &size)
@@ -403,6 +582,19 @@ void MenuUI::update(const cv::Size &frameSize, const Tracked &p1, const Tracked 
 
     if (screen_ == GameScreen::Title)
     {
+        updateManaBlocks_(frameSize, dt);
+
+        const cv::Rect *btnRects[3] = {&btnPlayRect_, &btnInfoRect_, &btnGlowRect_};
+        for (int i = 0; i < 3; ++i)
+        {
+            bool over = btnRects[i]->contains(mousePos_);
+            for (const Tracked *t : {&p1, &p2})
+                if (t->valid && btnRects[i]->contains(cv::Point(cvRound(t->pos.x), cvRound(t->pos.y))))
+                    over = true;
+            const float target = over ? 1.f : 0.f;
+            btnHover_[i] += (target - btnHover_[i]) * float(std::min(1.0, dt * 10.0));
+        }
+
         processWandOnTitle_(0, p1, dt);
         if (screen_ == GameScreen::Title)
             processWandOnTitle_(1, p2, dt);
@@ -438,6 +630,11 @@ void MenuUI::update(const cv::Size &frameSize, const Tracked &p1, const Tracked 
             }
         }
     }
+}
+
+void MenuUI::onMouseMove(int x, int y)
+{
+    mousePos_ = cv::Point(x, y);
 }
 
 void MenuUI::onMouseClick(int x, int y, const cv::Size &frameSize)
@@ -510,55 +707,217 @@ void MenuUI::draw(cv::Mat &frame) const
     }
 }
 
+namespace
+{
+    // Paleta (BGR): tons de roxo e azul
+    const cv::Scalar kManaPalette[] = {
+        cv::Scalar(200, 60, 150),  // roxo
+        cv::Scalar(255, 130, 180), // lavanda
+        cv::Scalar(230, 70, 90),   // indigo
+        cv::Scalar(255, 120, 50),  // azul
+        cv::Scalar(255, 170, 80),  // azul claro
+    };
+    constexpr int kManaPaletteSize = 5;
+    constexpr int kManaBlockCount = 30;
+    constexpr float kSideBand = 0.16f; // largura de cada faixa lateral (fracao da largura)
+
+    float frand(unsigned &s)
+    { // LCG simples em [0, 1)
+        s = s * 1664525u + 1013904223u;
+        return float((s >> 8) & 0xFFFFFF) / float(0x1000000);
+    }
+
+    // Cantos de um quadrado de lado 2*half girado em 'ang'
+    void quadPoints(float cx, float cy, float half, float ang, cv::Point out[4])
+    {
+        const float c = std::cos(ang), s = std::sin(ang);
+        const float dx[4] = {-half, half, half, -half};
+        const float dy[4] = {-half, -half, half, half};
+        for (int i = 0; i < 4; ++i)
+            out[i] = cv::Point(cvRound(cx + dx[i] * c - dy[i] * s), cvRound(cy + dx[i] * s + dy[i] * c));
+    }
+} // namespace
+
+void MenuUI::updateManaBlocks_(const cv::Size &size, double dt)
+{
+    if (size.width <= 0 || size.height <= 0)
+        return;
+    const float scale = size.height / 720.f;
+    const float fdt = float(dt);
+    titleTime_ += fdt;
+
+    // initial = true: espalha abaixo da tela para entrarem escalonados, vindo bem de baixo
+    auto spawn = [&](ManaBlock &b, bool initial)
+    {
+        b.size = (9.f + frand(rngState_) * 22.f) * scale;
+        const float band = size.width * kSideBand;
+        const bool left = frand(rngState_) < 0.5f;
+        const float off = frand(rngState_) * band;
+        b.x = left ? off : size.width - off;
+        b.y = size.height + b.size * 1.5f + (initial ? frand(rngState_) * size.height * 1.2f : frand(rngState_) * size.height * 0.15f);
+        b.speed = ((30.f + frand(rngState_) * 70.f) * (b.size / (18.f * scale)) * 0.6f + 20.f) * scale;
+        b.drift = (4.f + frand(rngState_) * 10.f) * scale;
+        b.phase = frand(rngState_) * 6.2832f;
+        b.angle = frand(rngState_) * 6.2832f;
+        b.spin = (frand(rngState_) - 0.5f) * 2.4f; // ~ +-1.2 rad/s
+        b.colorIdx = int(frand(rngState_) * kManaPaletteSize) % kManaPaletteSize;
+    };
+
+    if (manaBlocks_.empty())
+    {
+        manaBlocks_.resize(kManaBlockCount);
+        for (auto &b : manaBlocks_)
+            spawn(b, true);
+    }
+    for (auto &b : manaBlocks_)
+    {
+        b.y -= b.speed * fdt;
+        b.angle += b.spin * fdt;
+        if (b.y < -b.size * 2.f)
+            spawn(b, false);
+    }
+}
+
+void MenuUI::drawManaBlocks_(cv::Mat &frame) const
+{
+    if (manaBlocks_.empty() || frame.empty())
+        return;
+    const float H = float(frame.rows);
+
+    auto fade = [&](const ManaBlock &b)
+    {
+        const float fadeIn = std::clamp((H - b.y) / (H * 0.12f), 0.f, 1.f);
+        const float fadeOut = std::clamp(b.y / (H * 0.35f), 0.f, 1.f);
+        return fadeIn * fadeOut;
+    };
+    auto centerX = [&](const ManaBlock &b)
+    {
+        return b.x + std::sin(titleTime_ * 0.9f + b.phase) * b.drift;
+    };
+
+    // Desenha um bloco (nucleo + borda clara + miolo) com offset 'o' em 'dst'
+    auto drawBlock = [&](cv::Mat &dst, const ManaBlock &b, double a, cv::Point2f o, bool halo)
+    {
+        const float cx = centerX(b) - o.x, cy = b.y - o.y;
+        const float half = std::max(2.f, b.size * 0.5f);
+        const cv::Scalar col = kManaPalette[b.colorIdx];
+        cv::Point p[4];
+        if (halo)
+        {
+            quadPoints(cx, cy, half * 2.f, b.angle, p);
+            cv::fillConvexPoly(dst, p, 4, col * (0.25 * a));
+        }
+        quadPoints(cx, cy, half, b.angle, p);
+        cv::fillConvexPoly(dst, p, 4, col * (0.55 * a));
+        const cv::Point *pp = p;
+        const int np = 4;
+        cv::polylines(dst, &pp, &np, 1, true, (col * 0.4 + cv::Scalar(255, 255, 255) * 0.6) * a, 1);
+        quadPoints(cx, cy, std::max(1.f, half / 3.f), b.angle, p);
+        cv::fillConvexPoly(dst, p, 4, (col * 0.3 + cv::Scalar(255, 255, 255) * 0.7) * a);
+    };
+
+    if (!glowEnabled_)
+    {
+        // Modo leve: so os blocos, adicionados em pequenas ROIs, sem desfoque
+        for (const ManaBlock &b : manaBlocks_)
+        {
+            const double a = fade(b) * (0.75 + 0.25 * std::sin(titleTime_ * 3.f + b.phase));
+            if (a <= 0.02)
+                continue;
+            const int R = cvRound(b.size * 0.75f) + 3; // meia diagonal + folga
+            cv::Rect r(cvRound(centerX(b)) - R, cvRound(b.y) - R, 2 * R, 2 * R);
+            r &= cv::Rect(0, 0, frame.cols, frame.rows);
+            if (r.empty())
+                continue;
+            cv::Mat tmp = cv::Mat::zeros(r.size(), frame.type());
+            drawBlock(tmp, b, a, cv::Point2f(float(r.x), float(r.y)), false);
+            cv::Mat roi = frame(r);
+            cv::add(roi, tmp, roi);
+        }
+        return;
+    }
+
+    // Modo com brilho: camada aditiva + versao desfocada (em baixa resolucao por desempenho)
+    cv::Mat layer = cv::Mat::zeros(frame.size(), frame.type());
+    for (const ManaBlock &b : manaBlocks_)
+    {
+        const double a = fade(b) * (0.75 + 0.25 * std::sin(titleTime_ * 3.f + b.phase));
+        if (a > 0.02)
+            drawBlock(layer, b, a, cv::Point2f(0.f, 0.f), false);
+    }
+
+    cv::Mat small, glow;
+    cv::resize(layer, small, cv::Size(std::max(1, frame.cols / 4), std::max(1, frame.rows / 4)),
+               0, 0, cv::INTER_AREA);
+    cv::GaussianBlur(small, small, cv::Size(0, 0), 2.5);
+    small.convertTo(small, -1, 2.2);
+    cv::resize(small, glow, frame.size(), 0, 0, cv::INTER_LINEAR);
+
+    cv::add(frame, glow, frame);
+    cv::add(frame, layer, frame);
+}
+
 void MenuUI::drawTitleScreen_(cv::Mat &frame) const
 {
+    drawManaBlocks_(frame);
+
     // Botao esquerdo: "Jogar"
     float pProg = std::max(playHover_[0], playHover_[1]);
-    drawPixelPanel_(frame, btnPlayRect_,
-                    cv::Scalar(25, 48, 32),
-                    cv::Scalar(80, 220, 120),
-                    cv::Scalar(50, 130, 75),
-                    pProg > 0.05f);
-    if (pProg > 0.01f)
+    if (!drawImageButton_(frame, kBtnPlay, btnPlayRect_, pProg, cv::Scalar(80, 255, 140)))
     {
-        int barW = cvRound(btnPlayRect_.width * pProg);
-        cv::rectangle(frame, {btnPlayRect_.x, btnPlayRect_.br().y - 6},
-                      {btnPlayRect_.x + barW, btnPlayRect_.br().y}, cv::Scalar(80, 255, 140), cv::FILLED);
+        drawPixelPanel_(frame, btnPlayRect_,
+                        cv::Scalar(25, 48, 32),
+                        cv::Scalar(80, 220, 120),
+                        cv::Scalar(50, 130, 75),
+                        pProg > 0.05f);
+        if (pProg > 0.01f)
+        {
+            int barW = cvRound(btnPlayRect_.width * pProg);
+            cv::rectangle(frame, {btnPlayRect_.x, btnPlayRect_.br().y - 6},
+                          {btnPlayRect_.x + barW, btnPlayRect_.br().y}, cv::Scalar(80, 255, 140), cv::FILLED);
+        }
+        putCenteredText(frame, "Jogar", btnPlayRect_, cv::FONT_HERSHEY_DUPLEX, 0.95, cv::Scalar(220, 255, 225), 2);
     }
-    putCenteredText(frame, "Jogar", btnPlayRect_, cv::FONT_HERSHEY_DUPLEX, 0.95, cv::Scalar(220, 255, 225), 2);
 
     // Botao direito: "info"
     float iProg = std::max(infoHover_[0], infoHover_[1]);
-    drawPixelPanel_(frame, btnInfoRect_,
-                    cv::Scalar(28, 26, 48),
-                    cv::Scalar(220, 175, 70),
-                    cv::Scalar(125, 95, 40),
-                    iProg > 0.05f);
-    if (iProg > 0.01f)
+    if (!drawImageButton_(frame, kBtnInfo, btnInfoRect_, iProg, cv::Scalar(120, 230, 255)))
     {
-        int barW = cvRound(btnInfoRect_.width * iProg);
-        cv::rectangle(frame, {btnInfoRect_.x, btnInfoRect_.br().y - 6},
-                      {btnInfoRect_.x + barW, btnInfoRect_.br().y}, cv::Scalar(120, 230, 255), cv::FILLED);
+        drawPixelPanel_(frame, btnInfoRect_,
+                        cv::Scalar(28, 26, 48),
+                        cv::Scalar(220, 175, 70),
+                        cv::Scalar(125, 95, 40),
+                        iProg > 0.05f);
+        if (iProg > 0.01f)
+        {
+            int barW = cvRound(btnInfoRect_.width * iProg);
+            cv::rectangle(frame, {btnInfoRect_.x, btnInfoRect_.br().y - 6},
+                          {btnInfoRect_.x + barW, btnInfoRect_.br().y}, cv::Scalar(120, 230, 255), cv::FILLED);
+        }
+        putCenteredText(frame, "info", btnInfoRect_, cv::FONT_HERSHEY_DUPLEX, 0.95, cv::Scalar(255, 240, 195), 2);
     }
-    putCenteredText(frame, "info", btnInfoRect_, cv::FONT_HERSHEY_DUPLEX, 0.95, cv::Scalar(255, 240, 195), 2);
 
     // Botao de brilhos (ligado/desligado)
     float gProg = std::max(glowHover_[0], glowHover_[1]);
     const bool on = glowEnabled_;
-    drawPixelPanel_(frame, btnGlowRect_,
-                    on ? cv::Scalar(40, 30, 56) : cv::Scalar(34, 34, 34),
-                    on ? cv::Scalar(255, 150, 220) : cv::Scalar(130, 130, 130),
-                    on ? cv::Scalar(140, 80, 120) : cv::Scalar(80, 80, 80),
-                    gProg > 0.05f);
-    if (gProg > 0.01f)
+    if (!drawImageButton_(frame, on ? kBtnEffectsOn : kBtnEffectsOff, btnGlowRect_, gProg,
+                          cv::Scalar(255, 180, 240)))
     {
-        int barW = cvRound(btnGlowRect_.width * gProg);
-        cv::rectangle(frame, {btnGlowRect_.x, btnGlowRect_.br().y - 5},
-                      {btnGlowRect_.x + barW, btnGlowRect_.br().y}, cv::Scalar(255, 180, 240), cv::FILLED);
+        drawPixelPanel_(frame, btnGlowRect_,
+                        on ? cv::Scalar(40, 30, 56) : cv::Scalar(34, 34, 34),
+                        on ? cv::Scalar(255, 150, 220) : cv::Scalar(130, 130, 130),
+                        on ? cv::Scalar(140, 80, 120) : cv::Scalar(80, 80, 80),
+                        gProg > 0.05f);
+        if (gProg > 0.01f)
+        {
+            int barW = cvRound(btnGlowRect_.width * gProg);
+            cv::rectangle(frame, {btnGlowRect_.x, btnGlowRect_.br().y - 5},
+                          {btnGlowRect_.x + barW, btnGlowRect_.br().y}, cv::Scalar(255, 180, 240), cv::FILLED);
+        }
+        putCenteredText(frame, on ? "Brilhos: LIGADOS" : "Brilhos: DESLIGADOS", btnGlowRect_,
+                        cv::FONT_HERSHEY_DUPLEX, 0.7,
+                        on ? cv::Scalar(255, 220, 245) : cv::Scalar(190, 190, 190), 1);
     }
-    putCenteredText(frame, on ? "Brilhos: LIGADOS" : "Brilhos: DESLIGADOS", btnGlowRect_,
-                    cv::FONT_HERSHEY_DUPLEX, 0.7,
-                    on ? cv::Scalar(255, 220, 245) : cv::Scalar(190, 190, 190), 1);
 }
 
 void MenuUI::drawInfoScreen_(cv::Mat &frame) const

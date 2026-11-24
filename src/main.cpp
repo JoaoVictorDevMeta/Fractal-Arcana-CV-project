@@ -26,10 +26,12 @@ struct MouseCtx
 
 static void onMouse(int event, int x, int y, int, void *userdata)
 {
-    if (event != cv::EVENT_LBUTTONDOWN)
-        return;
     auto *ctx = static_cast<MouseCtx *>(userdata);
-    if (ctx && ctx->ui)
+    if (!ctx || !ctx->ui)
+        return;
+    if (event == cv::EVENT_MOUSEMOVE)
+        ctx->ui->onMouseMove(x, y);
+    else if (event == cv::EVENT_LBUTTONDOWN)
         ctx->ui->onMouseClick(x, y, ctx->size);
 }
 
