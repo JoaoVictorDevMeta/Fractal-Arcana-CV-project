@@ -211,6 +211,55 @@ void MenuUI::ensureBackground_(const cv::Size &size)
             cv::resize(titleBgCache_, titleBgCache_, size);
     }
 
+    // Logo da tela inicial (PNG com transparencia).
+    // O arquivo deve ficar em assets/main_title.png.
+    if (titleLogoSrc_.empty())
+    {
+        cv::Mat logo = cv::imread("assets/main_title.png", cv::IMREAD_UNCHANGED);
+        if (!logo.empty())
+        {
+            if (logo.depth() == CV_16U)
+                logo.convertTo(logo, CV_8U, 1.0 / 257.0);
+            if (logo.channels() == 3)
+                cv::cvtColor(logo, logo, cv::COLOR_BGR2BGRA);
+            else if (logo.channels() == 1)
+                cv::cvtColor(logo, logo, cv::COLOR_GRAY2BGRA);
+
+            if (logo.channels() == 4)
+            {
+                cv::Mat alpha, mask;
+                cv::extractChannel(logo, alpha, 3);
+                cv::threshold(alpha, mask, 8, 255, cv::THRESH_BINARY);
+                std::vector<cv::Point> points;
+                cv::findNonZero(mask, points);
+                if (!points.empty())
+                {
+                    // Calcula manualmente o retangulo dos pixels nao transparentes.
+                    // Evita depender de cv::boundingRect entre versoes do OpenCV.
+                    int minX = logo.cols, minY = logo.rows;
+                    int maxX = -1, maxY = -1;
+                    for (const cv::Point &pt : points)
+                    {
+                        minX = std::min(minX, pt.x);
+                        minY = std::min(minY, pt.y);
+                        maxX = std::max(maxX, pt.x);
+                        maxY = std::max(maxY, pt.y);
+                    }
+
+                    const int pad = 8;
+                    const int x0 = std::max(0, minX - pad);
+                    const int y0 = std::max(0, minY - pad);
+                    const int x1 = std::min(logo.cols, maxX + pad + 1);
+                    const int y1 = std::min(logo.rows, maxY + pad + 1);
+                    const cv::Rect bounds(x0, y0, x1 - x0, y1 - y0);
+                    titleLogoSrc_ = logo(bounds).clone();
+                }
+            }
+        }
+        if (titleLogoSrc_.empty())
+            std::fprintf(stderr, "Aviso: nao foi possivel carregar assets/main_title.png\\n");
+    }
+
     if (!btnLoaded_)
         loadButtonImages_();
     buildTitleLayout_(size);
@@ -220,15 +269,11 @@ void MenuUI::ensureBackground_(const cv::Size &size)
 void MenuUI::loadButtonImages_()
 {
     btnLoaded_ = true;
-    // Botoes desenhados como paineis (mesmo estilo da caixa do titulo): imagens desativadas.
-    btnImagesOk_ = false;
-    return;
-
     static const char *files[kBtnCount] = {
         "assets/button_jogar.png",
         "assets/button_info.png",
-        "assets/button_effects_off.png",
-        "assets/button_effects_on.png"};
+        "assets/button_effects_on.png",   // kBtnEffectsOn
+        "assets/button_effects_off.png"}; // kBtnEffectsOff
 
     btnImagesOk_ = true;
     for (int i = 0; i < kBtnCount; ++i)
@@ -279,12 +324,49 @@ void MenuUI::buildTitleLayout_(const cv::Size &size)
     const int w = size.width;
     const int h = size.height;
 
-    // Retangulo estilizado central para "Fractal Arcana"
-    int boxW = std::clamp((w * 56) / 100, 320, 760);
-    int boxH = std::clamp((h * 22) / 100, 100, 170);
-    int boxX = (w - boxW) / 2;
-    int boxY = (h - boxH) / 2 - h / 14;
-    titleFrameRect_ = cv::Rect(boxX, boxY, boxW, boxH);
+    // Logo centralizado, mantendo a proporcao original e deixando espaco para os botoes.
+    titleLogoNorm_.release();
+    titleLogoGlow_.release();
+    titleLogoGlowPad_ = 0;
+    if (!titleLogoSrc_.empty())
+    {
+        const double maxW = w * 0.82;
+        const double maxH = h * 0.28;
+        const double scale = std::min(maxW / titleLogoSrc_.cols,
+                                      maxH / titleLogoSrc_.rows);
+        const int logoW = std::max(1, cvRound(titleLogoSrc_.cols * scale));
+        const int logoH = std::max(1, cvRound(titleLogoSrc_.rows * scale));
+        cv::resize(titleLogoSrc_, titleLogoNorm_, cv::Size(logoW, logoH),
+                   0, 0, scale < 1.0 ? cv::INTER_AREA : cv::INTER_CUBIC);
+
+        titleFrameRect_ = cv::Rect((w - logoW) / 2,
+                                   cvRound(h * 0.32 - logoH / 2.0),
+                                   logoW, logoH);
+
+        // Mascara desfocada para o halo roxo, com margem para nao cortar o brilho.
+        titleLogoGlowPad_ = std::max(14, cvRound(logoW * 0.025));
+        cv::Mat alpha, glowMask;
+        cv::extractChannel(titleLogoNorm_, alpha, 3);
+        cv::Mat padded = cv::Mat::zeros(logoH + 2 * titleLogoGlowPad_,
+                                        logoW + 2 * titleLogoGlowPad_, CV_8U);
+        alpha.copyTo(padded(cv::Rect(titleLogoGlowPad_, titleLogoGlowPad_, logoW, logoH)));
+        cv::GaussianBlur(padded, glowMask, cv::Size(0, 0), titleLogoGlowPad_ * 0.55);
+
+        titleLogoGlow_ = cv::Mat::zeros(glowMask.size(), CV_8UC3);
+        std::vector<cv::Mat> glowChannels;
+        cv::split(titleLogoGlow_, glowChannels);
+        // Roxo/lavanda em BGR.
+        glowMask.convertTo(glowChannels[0], CV_8U, 0.72);
+        glowMask.convertTo(glowChannels[1], CV_8U, 0.28);
+        glowMask.convertTo(glowChannels[2], CV_8U, 1.00);
+        cv::merge(glowChannels, titleLogoGlow_);
+    }
+    else
+    {
+        titleFrameRect_ = cv::Rect(w / 2 - w * 28 / 100,
+                                   h / 2 - h * 11 / 100,
+                                   w * 56 / 100, h * 22 / 100);
+    }
 
     // Dois retangulos estilizados na regiao inferior: "Jogar" (esquerda) e "info" (direita)
     int btnW = std::clamp((w * 20) / 100, 150, 260);
@@ -314,8 +396,8 @@ void MenuUI::buildTitleLayout_(const cv::Size &size)
 
     // Tres botoes na mesma linha: Jogar | Info | Efeitos
     const int rowGap = std::clamp(w / 40, 12, 40);
-    int visW = (w * 94 / 100 - 2 * rowGap) / 3;
-    int visH = cvRound(visW / innerAspect);
+    int visW = ((w * 94 / 100 - 2 * rowGap) / 3) * 0.8;
+    int visH = (cvRound(visW / innerAspect)) * 0.8;
     const int maxH = std::max(40, (h * 22) / 100);
     if (visH > maxH)
     {
@@ -865,7 +947,32 @@ void MenuUI::drawTitleScreen_(cv::Mat &frame) const
 {
     drawManaBlocks_(frame);
 
-    // Estilo unico (titulo e botoes): painel escuro, borda ciano/dourada, texto roxo suave
+    // Logo "Fractal Arcana" com halo roxo suave.
+    if (!titleLogoNorm_.empty())
+    {
+        const cv::Point logoTL = titleFrameRect_.tl();
+        if (glowEnabled_ && !titleLogoGlow_.empty())
+        {
+            const float pulse = 0.82f + 0.12f * std::sin(titleTime_ * 2.4f);
+            const cv::Point glowTL = logoTL - cv::Point(titleLogoGlowPad_, titleLogoGlowPad_);
+            const cv::Rect glowRect(glowTL, titleLogoGlow_.size());
+            const cv::Rect visible = glowRect & cv::Rect(0, 0, frame.cols, frame.rows);
+            if (!visible.empty())
+            {
+                cv::Mat glow;
+                titleLogoGlow_(cv::Rect(visible.x - glowRect.x, visible.y - glowRect.y,
+                                        visible.width, visible.height))
+                    .convertTo(glow, CV_8UC3, pulse * 0.72);
+                cv::Mat roi = frame(visible);
+                cv::add(roi, glow, roi);
+            }
+        }
+
+        drawSprite(frame, titleLogoNorm_,
+                   logoTL + cv::Point(titleLogoNorm_.cols / 2, titleLogoNorm_.rows / 2));
+    }
+
+    // Estilo dos botoes: painel escuro, borda roxa, texto roxo suave
     const cv::Scalar panelFill(28, 22, 40);
     const cv::Scalar panelBorder(200, 120, 160); // BGR: roxo da borda
     const cv::Scalar panelInner(110, 60, 90);    // BGR: roxo escuro (borda interna)
@@ -898,23 +1005,6 @@ void MenuUI::drawTitleScreen_(cv::Mat &frame) const
         const cv::Scalar border = panelBorder * (1.f - hv) + hot * hv;
         drawPixelPanel_(frame, r, panelFill, border, panelInner, false, titlePurple);
     };
-
-    // Caixa com o titulo "Fractal Arcana"
-    if (!titleFrameRect_.empty())
-    {
-        drawPixelPanel_(frame, titleFrameRect_, panelFill, panelBorder, panelInner, false, titlePurple);
-
-        // escolhe a escala para o texto caber na caixa (80% da largura, 50% da altura)
-        const std::string title = "Fractal Arcana";
-        const int face = cv::FONT_HERSHEY_TRIPLEX;
-        const int thick = 2;
-        int baseline = 0;
-        const cv::Size ref = cv::getTextSize(title, face, 1.0, thick, &baseline);
-        const double scale = std::min(titleFrameRect_.width * 0.80 / ref.width,
-                                      titleFrameRect_.height * 0.50 / ref.height);
-        putCenteredText(frame, title, titleFrameRect_, face, scale,
-                        titlePurple, thick);
-    }
 
     // Botao esquerdo: "Jogar"
     float pProg = std::max(playHover_[0], playHover_[1]);
