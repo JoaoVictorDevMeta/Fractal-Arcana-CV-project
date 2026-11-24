@@ -4,6 +4,7 @@
 #include <vector>
 
 constexpr int kWizardFrames = 8;
+constexpr int kBarFrameWidth = 240; // largura (px) da moldura das barras de vida/mana na tela
 // Carrega PNG mantendo alfa (BGRA). Se height > 0, redimensiona mantendo proporção.
 // Retorna Mat vazia se falhar.
 cv::Mat loadSprite(const std::string &path, int height = 0);
@@ -16,15 +17,30 @@ std::vector<cv::Mat> loadStrip(const std::string &path, int frameW, int height);
 // Preenche 'out' (lado 0 = normal, lado 1 = espelhado). Retorna true se carregou algo.
 bool loadWizardFrames(const std::string &path, std::vector<cv::Mat> out[2]);
 
+// Skin de uma barra (vida ou mana): moldura + preenchimento.
+// Indice [lado]: 0 = P1 (original), 1 = P2 (espelhado horizontalmente).
+struct BarSkin
+{
+    cv::Mat frame[2]; // moldura ornamentada (BGRA)
+    cv::Mat fill[2];  // preenchimento ja ajustado ao tamanho do slot (BGRA)
+    cv::Rect slot[2]; // area interna da moldura (coords. relativas a moldura) onde o fill aparece
+    bool valid() const { return !frame[0].empty() && !fill[0].empty(); }
+};
+
+// Carrega um PNG com a moldura (esquerda) e o preenchimento (direita) lado a lado
+// (ex.: health_bar.png / mana_bar.png). A moldura e redimensionada para 'frameWidth' de largura.
+bool loadBarSkin(const std::string &path, int frameWidth, BarSkin &out);
+
 struct Assets
 {
     std::vector<cv::Mat> wizard[2]; // [lado][frame]  lado-0 = esquerda, lado-1 = direita
     cv::Mat shield[2];
-    cv::Mat bolt[2][6];                   // estaticos (fallback global) — lado P0
-    cv::Mat boltFlipped[2][6];            // idem, pre-flipado para P1
-    std::vector<cv::Mat> boltAnim[2][6];  // animados: [SpellType][frame] — lado P0
-    std::vector<cv::Mat> boltAnimFlipped[2][6]; // idem, pre-flipado para P1
-    cv::Mat background;               // opcional, BGR
+    cv::Mat bolt[2][6];                                                                // estaticos (fallback global) — lado P0
+    cv::Mat boltFlipped[2][6];                                                         // idem, pre-flipado para P1
+    std::vector<cv::Mat> boltAnim[2][6];                                               // animados: [SpellType][frame] — lado P0
+    std::vector<cv::Mat> boltAnimFlipped[2][6];                                        // idem, pre-flipado para P1
+    cv::Mat background;                                                                // opcional, BGR
+    BarSkin healthBar, manaBar;                                                        // barras de vida e mana (opcionais; ha fallback no HUD)
     cv::Scalar trailColor[2] = {cv::Scalar(255, 220, 120), cv::Scalar(255, 220, 120)}; // cor do rastro do raio (BGR)
 
     // p1Id / p2Id: prefixo do personagem (ex: "derzu", "baltar") —

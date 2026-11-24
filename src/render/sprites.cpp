@@ -221,10 +221,93 @@ static cv::Scalar computeTrailColor(const cv::Mat &m, const cv::Scalar &fallback
     if (n < 1)
         return fallback;
 
-    sb /= n; sg /= n; sr /= n;
+    sb /= n;
+    sg /= n;
+    sr /= n;
     const double mx = std::max({sb, sg, sr});
     const double k = mx > 0 ? 255.0 / mx : 1.0;
     return cv::Scalar(sb * k, sg * k, sr * k);
+}
+
+// ------------------------------------------------------------
+// Barras de vida / mana: PNG com a moldura e o preenchimento lado a lado
+// ------------------------------------------------------------
+
+// Posicao do "slot" (miolo escuro da moldura) como fracao da moldura recortada
+// (medido no asset original: moldura 353x118, slot em x=80, y=45, 200x30).
+static constexpr float kSlotX = 80.f / 353.f;
+static constexpr float kSlotY = 45.f / 118.f;
+static constexpr float kSlotW = 200.f / 353.f;
+static constexpr float kSlotH = 30.f / 118.f;
+// Contorno escuro do preenchimento (px no asset original) descartado, pois a moldura ja tem borda.
+static constexpr int kFillOutline = 4;
+
+bool loadBarSkin(const std::string &path, int frameWidth, BarSkin &out)
+{
+    out = BarSkin();
+    cv::Mat img = loadSprite(path);
+    if (img.empty() || img.channels() != 4 || frameWidth <= 0)
+        return false;
+
+    cv::Mat alpha;
+    cv::extractChannel(img, alpha, 3);
+
+    // Acha a maior lacuna horizontal vazia: separa moldura (esq.) do preenchimento (dir.)
+    cv::Mat colMax;
+    cv::reduce(alpha > 8, colMax, 0, cv::REDUCE_MAX, CV_8U);
+    int first = -1, last = -1, bestGap = 0, gapStart = -1;
+    for (int x = 0, prev = -1; x < colMax.cols; ++x)
+    {
+        if (!colMax.at<uchar>(0, x))
+            continue;
+        if (first < 0)
+            first = x;
+        if (prev >= 0 && x - prev - 1 > bestGap)
+        {
+            bestGap = x - prev - 1;
+            gapStart = prev;
+        }
+        prev = x;
+        last = x;
+    }
+    if (first < 0 || bestGap < 2)
+    {
+        std::fprintf(stderr, "Aviso: %s nao tem moldura + preenchimento\n", path.c_str());
+        return false;
+    }
+
+    auto cropPart = [&](int x0, int x1)
+    {
+        cv::Rect strip(x0, 0, x1 - x0 + 1, img.rows);
+        cv::Mat mask = alpha(strip) > 8;
+        cv::Rect bb = cv::boundingRect(mask);
+        return img(cv::Rect(strip.x + bb.x, bb.y, bb.width, bb.height)).clone();
+    };
+    cv::Mat frame = cropPart(first, gapStart);
+    cv::Mat fill = cropPart(gapStart + bestGap + 1, last);
+    if (fill.cols > 2 * kFillOutline + 4 && fill.rows > 2 * kFillOutline + 4)
+        fill = fill(cv::Rect(kFillOutline, kFillOutline,
+                             fill.cols - 2 * kFillOutline,
+                             fill.rows - 2 * kFillOutline))
+                   .clone();
+
+    // Escala a moldura para a largura pedida (pixel art: vizinho mais proximo)
+    const double s = double(frameWidth) / frame.cols;
+    cv::resize(frame, frame, {}, s, s, cv::INTER_NEAREST);
+
+    cv::Rect slot(cvRound(kSlotX * frame.cols), cvRound(kSlotY * frame.rows),
+                  cvRound(kSlotW * frame.cols), cvRound(kSlotH * frame.rows));
+    cv::resize(fill, fill, slot.size(), 0, 0, cv::INTER_NEAREST);
+
+    out.frame[0] = frame;
+    out.fill[0] = fill;
+    out.slot[0] = slot;
+
+    // Lado P2: tudo espelhado (o preenchimento encolhe da esquerda para a direita)
+    cv::flip(frame, out.frame[1], 1);
+    cv::flip(fill, out.fill[1], 1);
+    out.slot[1] = cv::Rect(frame.cols - slot.x - slot.width, slot.y, slot.width, slot.height);
+    return true;
 }
 
 bool Assets::load(const std::string &dir,
@@ -348,10 +431,10 @@ bool Assets::load(const std::string &dir,
         };
 
         const std::vector<cv::Mat> none;
-        loadSlot(SpellType::AtaqueFraco,    "projectile_" + id + ".png", 0,  120, 180, defFraco,  none,        none);
-        loadSlot(SpellType::AtaqueMedio,    "pierce_"     + id + ".png", 32, 100, 220, cv::Mat(), defMedio,    defMedioF);
-        loadSlot(SpellType::AtaqueForte,    "ray_"        + id + ".png", 0,  150, 200, defForte,  none,        none);
-        loadSlot(SpellType::AtaqueEspecial, "especial_"   + id + ".png", 32, 180, 220, cv::Mat(), defEspecial, defEspecialF);
+        loadSlot(SpellType::AtaqueFraco, "projectile_" + id + ".png", 0, 120, 180, defFraco, none, none);
+        loadSlot(SpellType::AtaqueMedio, "pierce_" + id + ".png", 32, 100, 220, cv::Mat(), defMedio, defMedioF);
+        loadSlot(SpellType::AtaqueForte, "ray_" + id + ".png", 0, 150, 200, defForte, none, none);
+        loadSlot(SpellType::AtaqueEspecial, "especial_" + id + ".png", 32, 180, 220, cv::Mat(), defEspecial, defEspecialF);
     }
 
     for (int p = 0; p < 2; ++p)
@@ -370,6 +453,17 @@ bool Assets::load(const std::string &dir,
     cv::Mat bg = cv::imread(dir + "/sprites/ui/fundoBatalha.jpg");
     if (!bg.empty())
         cv::resize(bg, background, {1280, 720});
+
+    // --- Barras de vida e mana (largura final da moldura: kBarFrameWidth) ---
+    auto loadBar = [&](BarSkin &skin, const std::string &file)
+    {
+        if (!loadBarSkin(dir + "/sprites/ui/" + file, kBarFrameWidth, skin))
+            loadBarSkin(dir + "/" + file, kBarFrameWidth, skin); // fallback: raiz de assets
+    };
+    healthBar = BarSkin();
+    manaBar = BarSkin();
+    loadBar(healthBar, "health_bar.png");
+    loadBar(manaBar, "mana_bar.png");
 
     return !wizard[0].empty(); // o minimo para jogar
 }

@@ -13,6 +13,8 @@ bool Match::cast(int p, Shape s)
 
     me.mana -= sp.manaCost;
     me.cooldown = kGlobalCooldown;
+    me.castGlow = kCastGlowTime;
+    me.castType = sp.type;
 
     if (sp.type == SpellType::Escudo)
     {
@@ -38,6 +40,7 @@ void Match::update(double dtd)
     {
         pl.mana = std::min(kStartMana, pl.mana + kManaRegenPerS * dt);
         pl.cooldown = std::max(0.f, pl.cooldown - dt);
+        pl.castGlow = std::max(0.f, pl.castGlow - dt);
         if (pl.shieldTime > 0.f)
         {
             pl.shieldTime -= dt;
