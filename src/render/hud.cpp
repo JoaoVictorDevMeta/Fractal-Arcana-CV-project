@@ -32,7 +32,7 @@ static float rnd(int a, int b) // ruido deterministico em [-1, 1]
 
 // Rastro de raio atras do projetil: head = ponta, dir = +1 (P1) ou -1 (P2).
 static void drawLightningTrail(cv::Mat &view, cv::Point tail, cv::Point head,
-                               const cv::Scalar &col, float time, int seed)
+                               const cv::Scalar &col, float time, int seed, bool glowEffects)
 {
     const int dir = (head.x >= tail.x) ? 1 : -1;
     const int len = std::abs(head.x - tail.x);
@@ -64,16 +64,20 @@ static void drawLightningTrail(cv::Mat &view, cv::Point tail, cv::Point head,
         return;
     const cv::Point off = roi.tl();
 
-    // brilho (camada aditiva desfocada)
-    cv::Mat glow = cv::Mat::zeros(roi.size(), view.type());
-    for (int j = 0; j < n; ++j)
-    {
-        double b = 0.55 + 0.45 * double(j) / n; // mais forte perto do projetil
-        cv::line(glow, pts[j] - off, pts[j + 1] - off, col * b, 9, cv::LINE_AA);
-    }
-    cv::GaussianBlur(glow, glow, {13, 13}, 0);
     cv::Mat sub = view(roi);
-    cv::add(sub, glow, sub);
+
+    // brilho (camada aditiva desfocada) - pulado quando os brilhos estao desligados
+    if (glowEffects)
+    {
+        cv::Mat glow = cv::Mat::zeros(roi.size(), view.type());
+        for (int j = 0; j < n; ++j)
+        {
+            double b = 0.55 + 0.45 * double(j) / n; // mais forte perto do projetil
+            cv::line(glow, pts[j] - off, pts[j + 1] - off, col * b, 9, cv::LINE_AA);
+        }
+        cv::GaussianBlur(glow, glow, {13, 13}, 0);
+        cv::add(sub, glow, sub);
+    }
 
     // nucleo + ramificacoes
     const cv::Scalar white(255, 255, 255);
@@ -148,7 +152,64 @@ static void drawCastGlow(cv::Mat &view, cv::Point c, int radius,
     cv::circle(view, c, ringR, col * g01, 2, cv::LINE_AA);
 }
 
-void drawGame(cv::Mat &view, const Match &m, const Assets &as)
+// Cor media (BGR) do sprite, ponderada pelo alfa e normalizada para ficar brilhante.
+// Amostra uma grade de ate ~24x24 pixels: custo baixo, sem precisar de cache.
+static cv::Scalar spriteGlowColor(const cv::Mat &spr)
+{
+    if (spr.empty() || spr.depth() != CV_8U || spr.channels() < 3)
+        return cv::Scalar(255, 255, 255);
+
+    const int stepY = std::max(1, spr.rows / 24);
+    const int stepX = std::max(1, spr.cols / 24);
+    const int cn = spr.channels();
+    double sb = 0, sg = 0, sr = 0, sw = 0;
+    for (int y = 0; y < spr.rows; y += stepY)
+    {
+        const uchar *row = spr.ptr<uchar>(y);
+        for (int x = 0; x < spr.cols; x += stepX)
+        {
+            const uchar *px = row + x * cn;
+            const double a = (cn == 4) ? px[3] / 255.0 : 1.0;
+            if (a < 0.1)
+                continue;
+            sb += px[0] * a;
+            sg += px[1] * a;
+            sr += px[2] * a;
+            sw += a;
+        }
+    }
+    if (sw <= 0.0)
+        return cv::Scalar(255, 255, 255);
+
+    cv::Scalar c(sb / sw, sg / sw, sr / sw);
+    const double mx = std::max({c[0], c[1], c[2], 1.0});
+    const double k = 255.0 / mx; // brilho maximo mantendo o matiz
+    return cv::Scalar(c[0] * k, c[1] * k, c[2] * k);
+}
+
+// Brilho pulsante aditivo ao redor de um feitico em voo.
+static void drawSpellGlow(cv::Mat &view, cv::Point c, int radius,
+                          const cv::Scalar &col, float time)
+{
+    if (radius <= 0)
+        return;
+    const double pulse = 0.65 + 0.35 * std::sin(time * 14.0);
+
+    const int pad = radius * 2;
+    cv::Rect roi(c.x - pad, c.y - pad, 2 * pad, 2 * pad);
+    roi &= cv::Rect(0, 0, view.cols, view.rows);
+    if (roi.empty())
+        return;
+
+    cv::Mat glow = cv::Mat::zeros(roi.size(), view.type());
+    cv::circle(glow, c - roi.tl(), cvRound(radius * 0.5), col * (0.8 * pulse),
+               cv::FILLED, cv::LINE_AA);
+    cv::GaussianBlur(glow, glow, {0, 0}, radius * 0.4);
+    cv::Mat sub = view(roi);
+    cv::add(sub, glow, sub);
+}
+
+void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
 {
     if (!as.background.empty())
     {
@@ -171,8 +232,9 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as)
     for (int p = 0; p < 2; ++p)
     {
         // brilho atras do mago ao lancar feitico
-        drawCastGlow(view, {xs[p], H / 2}, cvRound(H * 0.45f),
-                     castGlowColor(m.castType(p)), m.castGlow01(p));
+        if (glowEffects)
+            drawCastGlow(view, {xs[p], H / 2}, cvRound(H * 0.45f),
+                         castGlowColor(m.castType(p)), m.castGlow01(p));
 
         const auto &fr = as.wizard[p];
         if (!fr.empty())
@@ -212,13 +274,22 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as)
 
         if (!spr->empty())
         {
+            // brilho com a cor media do sprite (atras do feitico)
+            if (glowEffects)
+            {
+                const double fit = spr->rows > H - 4 ? double(H - 4) / spr->rows : 1.0;
+                const int glowR = std::min(cvRound(std::max(spr->cols, spr->rows) * fit * 0.7),
+                                           cvRound(H * 0.5));
+                drawSpellGlow(view, {x, H / 2}, glowR, spriteGlowColor(*spr), m.time());
+            }
+
             if (pr.type == SpellType::AtaqueMedio) // Raio: corta a arena inteira
             {
                 const int dir = (pr.owner == 0) ? 1 : -1;
                 const cv::Point tail(xs[pr.owner] + dir * 40, H / 2);
                 const cv::Point head(x - dir * (spr->cols / 3), H / 2);
                 drawLightningTrail(view, tail, head, as.trailColor[pr.owner],
-                                   m.time(), pr.owner);
+                                   m.time(), pr.owner, glowEffects);
             }
             drawFit(view, *spr, {x, H / 2});
         }

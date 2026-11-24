@@ -6,42 +6,45 @@
 #include <string>
 #include <vector>
 
-enum class GameScreen {
+enum class GameScreen
+{
     Title,
     Info,
     CharacterSelect,
     DuelReady
 };
 
-struct CharacterDef {
+struct CharacterDef
+{
     std::string id;
     std::string name;
-    std::string selectImage;  // xxx_select.{png,jpeg}  retrato no menu
-    std::string playerImage;  // xxx_player.png         spritesheet no jogo
-    cv::Mat portrait;         // carregada do disco ou gerada como fallback
-    cv::Rect cardRect;        // area na tela de selecao
+    std::string selectImage;            // xxx_select.{png,jpeg}  retrato no menu
+    std::string playerImage;            // xxx_player.png         spritesheet no jogo
+    cv::Mat portrait;                   // carregada do disco ou gerada como fallback
+    cv::Rect cardRect;                  // area na tela de selecao
     float drawProgress[2] = {0.f, 0.f}; // progresso desenhado pela varinha de P1 e P2
-    cv::Mat drawLayer;        // tracos desenhados sobre o card
+    cv::Mat drawLayer;                  // tracos desenhados sobre o card
 };
 
-class MenuUI {
+class MenuUI
+{
 public:
     MenuUI();
 
     // Carrega as 6 imagens dos personagens (com fallback caso algum arquivo nao exista ainda)
-    bool loadCharacters(const std::string& assetsDir = "assets");
+    bool loadCharacters(const std::string &assetsDir = "assets");
 
     // Atualiza estado a partir das posicoes das varinhas (P1 e P2) e/ou clique de mouse
-    void update(const cv::Size& frameSize,
-                const Tracked& p1,
-                const Tracked& p2,
+    void update(const cv::Size &frameSize,
+                const Tracked &p1,
+                const Tracked &p2,
                 double dt);
 
     // Desenha a tela atual sobre o frame
-    void draw(cv::Mat& frame) const;
+    void draw(cv::Mat &frame) const;
 
     // Eventos auxiliares (mouse / teclado)
-    void onMouseClick(int x, int y, const cv::Size& frameSize);
+    void onMouseClick(int x, int y, const cv::Size &frameSize);
     void resetSelection();
 
     GameScreen screen() const { return screen_; }
@@ -59,38 +62,47 @@ public:
     // Retorna o id curto do personagem (ex: "derzu", "baltar")
     std::string characterId(int idx) const;
 
-private:
-    void ensureBackground_(const cv::Size& size);
-    void buildTitleLayout_(const cv::Size& size);
-    void buildCharacterLayout_(const cv::Size& size);
+    // Brilhos (glow) ligados/desligados na tela inicial; desligar melhora o desempenho
+    bool glowEnabled() const { return glowEnabled_; }
+    void setGlowEnabled(bool on) { glowEnabled_ = on; }
 
-    void drawPixelPanel_(cv::Mat& img, const cv::Rect& r,
-                         const cv::Scalar& fill,
-                         const cv::Scalar& borderOuter,
-                         const cv::Scalar& borderInner,
+private:
+    void ensureBackground_(const cv::Size &size);
+    void buildTitleLayout_(const cv::Size &size);
+    void buildCharacterLayout_(const cv::Size &size);
+
+    void drawPixelPanel_(cv::Mat &img, const cv::Rect &r,
+                         const cv::Scalar &fill,
+                         const cv::Scalar &borderOuter,
+                         const cv::Scalar &borderInner,
                          bool highlight = false) const;
 
-    void drawTitleScreen_(cv::Mat& frame) const;
-    void drawInfoScreen_(cv::Mat& frame) const;
-    void drawCharacterSelect_(cv::Mat& frame) const;
+    void drawTitleScreen_(cv::Mat &frame) const;
+    void drawInfoScreen_(cv::Mat &frame) const;
+    void drawCharacterSelect_(cv::Mat &frame) const;
 
-    void processWandOnTitle_(int playerIdx, const Tracked& trk, double dt);
-    void processWandOnSelect_(int playerIdx, const Tracked& trk, double dt);
+    void processWandOnTitle_(int playerIdx, const Tracked &trk, double dt);
+    void processWandOnSelect_(int playerIdx, const Tracked &trk, double dt);
 
     GameScreen screen_ = GameScreen::Title;
     cv::Size lastSize_{0, 0};
     cv::Mat bgCache_;
+    cv::Mat titleBgCache_; // assets/menu_image.jpg (fundo so da tela inicial)
 
     // Botoes da tela inicial
     cv::Rect titleFrameRect_;
     cv::Rect btnPlayRect_;
     cv::Rect btnInfoRect_;
     cv::Rect btnBackRect_;
+    cv::Rect btnGlowRect_;
 
     // Hover / progresso de ativacao por varinha nos botoes iniciais
     float playHover_[2] = {0.f, 0.f};
     float infoHover_[2] = {0.f, 0.f};
     float backHover_[2] = {0.f, 0.f};
+    float glowHover_[2] = {0.f, 0.f};
+    bool glowLatch_[2] = {false, false}; // evita alternar em loop enquanto a varinha fica no botao
+    bool glowEnabled_ = true;
 
     std::vector<CharacterDef> chars_;
     int chosen_[2] = {-1, -1};
