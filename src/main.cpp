@@ -18,32 +18,29 @@
 #include <fstream>
 #include <string>
 
-struct MouseCtx {
-    MenuUI* ui = nullptr;
+struct MouseCtx
+{
+    MenuUI *ui = nullptr;
     cv::Size size{1280, 720};
 };
 
-static void onMouse(int event, int x, int y, int, void* userdata) {
-    if (event != cv::EVENT_LBUTTONDOWN) return;
-    auto* ctx = static_cast<MouseCtx*>(userdata);
-    if (ctx && ctx->ui) ctx->ui->onMouseClick(x, y, ctx->size);
+static void onMouse(int event, int x, int y, int, void *userdata)
+{
+    if (event != cv::EVENT_LBUTTONDOWN)
+        return;
+    auto *ctx = static_cast<MouseCtx *>(userdata);
+    if (ctx && ctx->ui)
+        ctx->ui->onMouseClick(x, y, ctx->size);
 }
 
-static void drawHudBar(cv::Mat& image, const cv::Rect& rect, float value,
-                       const cv::Scalar& color) {
-    cv::rectangle(image, rect, cv::Scalar(55, 55, 55), cv::FILLED);
-    cv::Rect fill = rect;
-    fill.width = cvRound(rect.width * std::clamp(value, 0.f, 1.f));
-    if (fill.width > 0) cv::rectangle(image, fill, color, cv::FILLED);
-    cv::rectangle(image, rect, cv::Scalar(220, 220, 220), 1);
-}
-
-static cv::Mat makeCameraView(const cv::Mat& source, const cv::Rect& zone,
-                              const cv::Size& outputSize) {
+static cv::Mat makeCameraView(const cv::Mat &source, const cv::Rect &zone,
+                              const cv::Size &outputSize)
+{
     const double aspect = double(outputSize.width) / outputSize.height;
     int cropWidth = zone.width;
     int cropHeight = cvRound(cropWidth / aspect);
-    if (cropHeight > zone.height) {
+    if (cropHeight > zone.height)
+    {
         cropHeight = zone.height;
         cropWidth = cvRound(cropHeight * aspect);
     }
@@ -56,9 +53,11 @@ static cv::Mat makeCameraView(const cv::Mat& source, const cv::Rect& zone,
 }
 
 // Sobreposicao "PAUSADO" desenhada por cima do frame enquanto a pausa esta ativa.
-static void drawPausedOverlay(cv::Mat& img) {
-    if (img.empty()) return;
-    const char* txt = "PAUSADO";
+static void drawPausedOverlay(cv::Mat &img)
+{
+    if (img.empty())
+        return;
+    const char *txt = "PAUSADO";
     const double scale = std::max(1.0, img.cols / 900.0);
     int baseline = 0;
     const cv::Size ts = cv::getTextSize(txt, cv::FONT_HERSHEY_DUPLEX, scale, 3, &baseline);
@@ -70,7 +69,8 @@ static void drawPausedOverlay(cv::Mat& img) {
                 cv::Scalar(140, 245, 255), 3, cv::LINE_AA);
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv)
+{
     int camIdx = 0;
     for (int i = 1; i < argc; ++i)
         if (!std::strcmp(argv[i], "--camera") && i + 1 < argc)
@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
     MenuUI menu;
     menu.loadCharacters("assets");
 
-    const char* camWin = "Fractal Arcana";
+    const char *camWin = "Fractal Arcana";
     cv::namedWindow(camWin, cv::WINDOW_NORMAL);
     cv::resizeWindow(camWin, 960, 600);
     MouseCtx mouseCtx{&menu, {1280, 720}};
@@ -110,8 +110,10 @@ int main(int argc, char** argv) {
     cv::Mat frame;
     FrameTimer frameTimer;
 
-    for (;;) {
-        if (!cam.read(frame)) break;
+    for (;;)
+    {
+        if (!cam.read(frame))
+            break;
         mouseCtx.size = frame.size();
 
         const double dt = frameTimer.tick();
@@ -124,13 +126,17 @@ int main(int argc, char** argv) {
         Tracked t2 = game.player(1).trk;
 
         if (!paused)
-            for (int p = 0; p < 2; ++p) {
+            for (int p = 0; p < 2; ++p)
+            {
                 sinceMs[p] += dt * 1000.0;
-                if (game.pen[p].hasFinishedStroke()) {
-                    if (menu.screen() == GameScreen::DuelReady) {
+                if (game.pen[p].hasFinishedStroke())
+                {
+                    if (menu.screen() == GameScreen::DuelReady)
+                    {
                         std::vector<cv::Point2f> stroke = game.pen[p].getStroke();
                         lastResult[p] = classifier.classify(stroke);
-                        if (lastResult[p].shape != Shape::Nenhum) {
+                        if (lastResult[p].shape != Shape::Nenhum)
+                        {
                             if (match.cast(p, lastResult[p].shape))
                                 sinceMs[p] = 0.0;
                             else
@@ -142,31 +148,43 @@ int main(int argc, char** argv) {
                 }
             }
 
-        if (menu.screen() == GameScreen::DuelReady) {
+        if (menu.screen() == GameScreen::DuelReady)
+        {
             // Carrega assets uma unica vez ao entrar no duelo
-            if (!assetsLoaded) {
+            if (!assetsLoaded)
+            {
                 int i1 = menu.selectedP1();
                 int i2 = menu.selectedP2();
                 std::string p1File = menu.characterPlayerImage(i1);
                 std::string p2File = menu.characterPlayerImage(i2);
-                if (p1File.empty()) p1File = "mage1.png";
-                if (p2File.empty()) p2File = "Idle.png";
+                if (p1File.empty())
+                    p1File = "mage1.png";
+                if (p2File.empty())
+                    p2File = "Idle.png";
                 assets.load("assets", p1File, p2File,
                             menu.characterId(i1), menu.characterId(i2));
                 assetsLoaded = true;
             }
-            if (!paused) match.update(dt);
-        } else {
+            if (!paused)
+                match.update(dt);
+        }
+        else
+        {
             // Fora do duelo, reseta flag para permitir troca de personagem
             assetsLoaded = false;
-            if (!paused) menu.update(frame.size(), t1, t2, dt);
+            if (!paused)
+                menu.update(frame.size(), t1, t2, dt);
             menu.draw(frame);
         }
 
-        if (menu.screen() != GameScreen::DuelReady) {
-            if (paused) drawPausedOverlay(frame);
+        if (menu.screen() != GameScreen::DuelReady)
+        {
+            if (paused)
+                drawPausedOverlay(frame);
             cv::imshow(camWin, frame);
-        } else {
+        }
+        else
+        {
             const int width = frame.cols;
             const int height = frame.rows;
             const int hudHeight = std::max(64, height * 18 / 100);
@@ -180,30 +198,34 @@ int main(int argc, char** argv) {
             cv::Mat display(height, width, CV_8UC3, cv::Scalar(18, 16, 25));
             cv::Mat hud = display(cv::Rect(0, 0, width, hudHeight));
             const int playerWidth = width / 2;
-            for (int p = 0; p < 2; ++p) {
+            for (int p = 0; p < 2; ++p)
+            {
                 const int left = p * playerWidth;
                 const int textX = left + margin;
                 const int barWidth = std::max(1, playerWidth - 2 * margin);
                 const int titleY = std::max(18, hudHeight * 24 / 100);
-                const int hpY = hudHeight * 49 / 100;
-                const int manaY = hudHeight * 78 / 100;
-                const int barHeight = std::max(5, hudHeight / 13);
 
                 cv::putText(hud, p == 0 ? "JOGADOR 1" : "JOGADOR 2",
                             {textX, titleY}, cv::FONT_HERSHEY_SIMPLEX, 0.65,
                             cv::Scalar(245, 230, 190), 2, cv::LINE_AA);
-                cv::putText(hud, cv::format("HP: %d/100",
-                            cvRound(match.health01(p) * 100.f)),
-                            {textX, hpY}, cv::FONT_HERSHEY_SIMPLEX, 0.48,
-                            cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
-                drawHudBar(hud, {textX, hpY + 4, barWidth, barHeight},
-                           match.health01(p), cv::Scalar(50, 60, 220));
-                cv::putText(hud, cv::format("MANA: %d/100",
-                            cvRound(match.mana01(p) * 100.f)),
-                            {textX, manaY}, cv::FONT_HERSHEY_SIMPLEX, 0.48,
-                            cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
-                drawHudBar(hud, {textX, manaY + 4, barWidth, barHeight},
-                           match.mana01(p), cv::Scalar(220, 140, 40));
+
+                // Barras de vida e mana (com moldura), lado a lado abaixo do titulo.
+                // P1: vida | mana (da esquerda p/ direita). P2: mana | vida (vida na borda externa).
+                const int barGap = std::max(6, margin / 2);
+                const int barTop = titleY + 6;
+                const int barMaxH = std::max(1, hudHeight - barTop - 4);
+                const cv::Size barSize = statBarSize(assets, {std::max(1, (barWidth - barGap) / 2), barMaxH});
+                const int barY = barTop + (barMaxH - barSize.height) / 2;
+                const int rowW = 2 * barSize.width + barGap;
+                const int rowX = (p == 0) ? textX : left + playerWidth - margin - rowW;
+                const cv::Rect healthRect(p == 0 ? rowX : rowX + barSize.width + barGap, barY,
+                                          barSize.width, barSize.height);
+                const cv::Rect manaRect(p == 0 ? rowX + barSize.width + barGap : rowX, barY,
+                                        barSize.width, barSize.height);
+                drawStatBar(hud, assets, BarKind::Health, p, match.health01(p), healthRect,
+                            cv::format("%d/100", cvRound(match.health01(p) * 100.f)));
+                drawStatBar(hud, assets, BarKind::Mana, p, match.mana01(p), manaRect,
+                            cv::format("%d/100", cvRound(match.mana01(p) * 100.f)));
                 if (sinceMs[p] < cooldownMs)
                     cv::putText(hud, "AGUARDE", {textX + barWidth - 90, titleY},
                                 cv::FONT_HERSHEY_SIMPLEX, 0.42,
@@ -213,14 +235,18 @@ int main(int argc, char** argv) {
                      cv::Scalar(120, 120, 130), 1, cv::LINE_AA);
 
             cv::Mat cameraSource;
-            if (debug) {
+            if (debug)
+            {
                 cv::cvtColor(game.combinedMask(), cameraSource, cv::COLOR_GRAY2BGR);
-            } else {
+            }
+            else
+            {
                 cameraSource = frame;
                 game.draw(cameraSource);
             }
 
-            for (int p = 0; p < 2; ++p) {
+            for (int p = 0; p < 2; ++p)
+            {
                 const cv::Size cameraSize(cameraWidth, cameraPanelHeight);
                 const cv::Mat cameraView = makeCameraView(
                     cameraSource, game.zone(p), cameraSize);
@@ -232,10 +258,10 @@ int main(int argc, char** argv) {
 
                 const int statusY = std::min(height - arenaHeight - 4,
                                              y + cameraPanelHeight + 20);
-                const ShapeResult& result = lastResult[p];
+                const ShapeResult &result = lastResult[p];
                 const std::string status = result.shape != Shape::Nenhum
-                    ? "MAGIA: " + spellFor(result.shape).name
-                    : (result.resultText.empty() ? "" : "Forma nao reconhecida");
+                                               ? "MAGIA: " + spellFor(result.shape).name
+                                               : (result.resultText.empty() ? "" : "Forma nao reconhecida");
                 if (!status.empty())
                     cv::putText(display, status, {p * playerWidth + margin, statusY},
                                 cv::FONT_HERSHEY_SIMPLEX, 0.45,
@@ -246,17 +272,26 @@ int main(int argc, char** argv) {
             drawGame(arena, match, assets);
             cv::line(display, {0, cameraY}, {width, cameraY},
                      cv::Scalar(100, 100, 110), 1, cv::LINE_AA);
-            if (paused) drawPausedOverlay(display);
+            if (paused)
+                drawPausedOverlay(display);
             cv::imshow(camWin, display);
         }
 
         // --- TECLAS (um unico waitKey) ---
         const int k = cv::waitKey(1);
-        if (k == 27) break;
-        if (k == 'r' || k == 'R') { menu.resetSelection(); match.reset(); }
-        if (k == ' ') paused = !paused;
-        if (k == 'm' || k == 'M') menu.setScreen(GameScreen::Title);
-        if (k == 'd' || k == 'D') {
+        if (k == 27)
+            break;
+        if (k == 'r' || k == 'R')
+        {
+            menu.resetSelection();
+            match.reset();
+        }
+        if (k == ' ')
+            paused = !paused;
+        if (k == 'm' || k == 'M')
+            menu.setScreen(GameScreen::Title);
+        if (k == 'd' || k == 'D')
+        {
             debug = !debug;
             if (!debug)
                 cv::destroyWindow("Mascaras");

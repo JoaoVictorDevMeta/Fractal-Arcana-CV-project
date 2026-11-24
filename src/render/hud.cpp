@@ -2,6 +2,10 @@
 #include "render/sprites.h"
 #include "game/match.h"
 #include <opencv2/imgproc.hpp>
+#include <algorithm>
+#include <cmath>
+#include <string>
+#include <vector>
 
 // Reduz o sprite se ele for mais alto que a arena (em vez de cortar).
 static void drawFit(cv::Mat &view, const cv::Mat &spr, cv::Point center)
@@ -24,7 +28,7 @@ static float rnd(int a, int b) // ruido deterministico em [-1, 1]
     h = (h ^ (h >> 13)) * 1274126177u;
     h ^= h >> 16;
     return (h & 0xFFFF) / 65535.f * 2.f - 1.f;
-}   
+}
 
 // Rastro de raio atras do projetil: head = ponta, dir = +1 (P1) ou -1 (P2).
 static void drawLightningTrail(cv::Mat &view, cv::Point tail, cv::Point head,
@@ -47,8 +51,10 @@ static void drawLightningTrail(cv::Mat &view, cv::Point tail, cv::Point head,
         float amp = 3.f + 16.f * std::sin(f * 3.14159f);
         int x = (j == n) ? head.x : tail.x + dir * j * step;
         int y = tail.y + int(rnd(j + seed * 97, tick) * amp);
-        if (j == 0) y = tail.y;
-        if (j == n) y = head.y;
+        if (j == 0)
+            y = tail.y;
+        if (j == n)
+            y = head.y;
         pts.push_back({x, y});
     }
 
@@ -90,6 +96,58 @@ static void drawLightningTrail(cv::Mat &view, cv::Point tail, cv::Point head,
     }
 }
 
+// Desenha um sprite com o canto superior esquerdo em 'tl'.
+static void drawSpriteTL(cv::Mat &view, const cv::Mat &spr, cv::Point tl)
+{
+    drawSprite(view, spr, tl + cv::Point(spr.cols / 2, spr.rows / 2));
+}
+
+// Cor do brilho (BGR) conforme o feitico lancado.
+static cv::Scalar castGlowColor(SpellType t)
+{
+    switch (t)
+    {
+    case SpellType::AtaqueFraco:
+        return cv::Scalar(30, 120, 255); // laranja
+    case SpellType::AtaqueMedio:
+        return cv::Scalar(255, 220, 120); // azul claro
+    case SpellType::AtaqueForte:
+        return cv::Scalar(50, 90, 220); // vermelho
+    case SpellType::Escudo:
+        return cv::Scalar(255, 230, 100); // ciano
+    case SpellType::AtaqueEspecial:
+        return cv::Scalar(255, 80, 220); // magenta
+    default:
+        return cv::Scalar(255, 255, 255);
+    }
+}
+
+// Brilho aditivo ao redor do mago + anel que se expande. g01: 1 = recem lancado, 0 = apagado.
+static void drawCastGlow(cv::Mat &view, cv::Point c, int radius,
+                         const cv::Scalar &col, float g01)
+{
+    g01 = std::clamp(g01, 0.f, 1.f);
+    if (g01 <= 0.f || radius <= 0)
+        return;
+
+    const int pad = radius * 2;
+    cv::Rect roi(c.x - pad, c.y - pad, 2 * pad, 2 * pad);
+    roi &= cv::Rect(0, 0, view.cols, view.rows);
+    if (roi.empty())
+        return;
+
+    cv::Mat glow = cv::Mat::zeros(roi.size(), view.type());
+    cv::circle(glow, c - roi.tl(), cvRound(radius * 0.6), col * (0.9 * g01),
+               cv::FILLED, cv::LINE_AA);
+    cv::GaussianBlur(glow, glow, {0, 0}, radius * 0.3);
+    cv::Mat sub = view(roi);
+    cv::add(sub, glow, sub);
+
+    // anel que cresce enquanto o brilho some
+    const int ringR = cvRound(radius * (0.35 + 0.65 * (1.f - g01)));
+    cv::circle(view, c, ringR, col * g01, 2, cv::LINE_AA);
+}
+
 void drawGame(cv::Mat &view, const Match &m, const Assets &as)
 {
     if (!as.background.empty())
@@ -112,6 +170,10 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as)
     // magos e escudos
     for (int p = 0; p < 2; ++p)
     {
+        // brilho atras do mago ao lancar feitico
+        drawCastGlow(view, {xs[p], H / 2}, cvRound(H * 0.45f),
+                     castGlowColor(m.castType(p)), m.castGlow01(p));
+
         const auto &fr = as.wizard[p];
         if (!fr.empty())
         {
@@ -163,7 +225,92 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as)
         else
             cv::circle(view, {x, H / 2}, 10 + int(pr.damage / 3), {80, 80, 255}, cv::FILLED);
     }
+
     if (m.state() != MatchState::Running)
         cv::putText(view, m.state() == MatchState::Player0Won ? "JOGADOR 1 VENCEU" : "JOGADOR 2 VENCEU",
                     {W / 2 - 200, H / 2 - 55}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {255, 255, 255}, 3);
+}
+
+// ---------------------------------------------------------------------------
+// Barras de vida/mana usadas pelo HUD superior (chamadas pelo main.cpp)
+// ---------------------------------------------------------------------------
+
+static const BarSkin &skinFor(const Assets &as, BarKind kind)
+{
+    return kind == BarKind::Health ? as.healthBar : as.manaBar;
+}
+
+cv::Size statBarSize(const Assets &as, const cv::Size &maxSize)
+{
+    const BarSkin &sk = as.healthBar.valid() ? as.healthBar : as.manaBar;
+    if (!sk.valid())
+        return {std::max(1, maxSize.width), std::max(1, std::min(maxSize.height, 22))};
+
+    const cv::Mat &f = sk.frame[0];
+    const double s = std::min({double(maxSize.width) / f.cols,
+                               double(maxSize.height) / f.rows, 1.0});
+    return {std::max(1, cvRound(f.cols * s)), std::max(1, cvRound(f.rows * s))};
+}
+
+void drawStatBar(cv::Mat &dst, const Assets &as, BarKind kind, int side,
+                 float v01, const cv::Rect &rect, const std::string &label)
+{
+    v01 = std::clamp(v01, 0.f, 1.f);
+    side = std::clamp(side, 0, 1);
+    const BarSkin &sk = skinFor(as, kind);
+    cv::Rect textArea = rect;
+
+    if (!sk.valid())
+    {
+        // Fallback: retangulo simples
+        const cv::Scalar col = kind == BarKind::Health ? cv::Scalar(60, 60, 230)
+                                                       : cv::Scalar(230, 160, 50);
+        cv::rectangle(dst, rect, {20, 20, 20}, cv::FILLED);
+        const int w = cvRound((rect.width - 4) * v01);
+        const int x = side == 0 ? rect.x + 2 : rect.x + rect.width - 2 - w;
+        if (w > 0)
+            cv::rectangle(dst, cv::Rect(x, rect.y + 2, w, rect.height - 4), col, cv::FILLED);
+        cv::rectangle(dst, rect, {255, 255, 255}, 1);
+    }
+    else
+    {
+        // Moldura redimensionada para o rect
+        const cv::Mat &src = sk.frame[side];
+        const double sx = double(rect.width) / src.cols;
+        const double sy = double(rect.height) / src.rows;
+        cv::Mat frame;
+        cv::resize(src, frame, rect.size(), 0, 0, cv::INTER_AREA);
+        drawSpriteTL(dst, frame, rect.tl());
+
+        // Slot interno escalado
+        const cv::Rect &sl = sk.slot[side];
+        const cv::Rect slot(cvRound(sl.x * sx), cvRound(sl.y * sy),
+                            std::max(1, cvRound(sl.width * sx)),
+                            std::max(1, cvRound(sl.height * sy)));
+        textArea = cv::Rect(rect.x + slot.x, rect.y + slot.y, slot.width, slot.height);
+
+        const int w = cvRound(slot.width * v01);
+        if (w > 0)
+        {
+            cv::Mat fill;
+            cv::resize(sk.fill[side], fill, slot.size(), 0, 0, cv::INTER_AREA);
+            const int srcX = side == 0 ? 0 : slot.width - w;
+            const int dstX = side == 0 ? slot.x : slot.x + slot.width - w;
+            drawSpriteTL(dst, fill(cv::Rect(srcX, 0, w, slot.height)),
+                         rect.tl() + cv::Point(dstX, slot.y));
+        }
+    }
+
+    if (!label.empty())
+    {
+        const double scale = std::clamp(textArea.height / 28.0, 0.3, 0.6);
+        int base = 0;
+        const cv::Size ts = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, scale, 1, &base);
+        const cv::Point org(textArea.x + (textArea.width - ts.width) / 2,
+                            textArea.y + (textArea.height + ts.height) / 2);
+        cv::putText(dst, label, org + cv::Point(1, 1), cv::FONT_HERSHEY_SIMPLEX, scale,
+                    {0, 0, 0}, 2, cv::LINE_AA);
+        cv::putText(dst, label, org, cv::FONT_HERSHEY_SIMPLEX, scale,
+                    {255, 255, 255}, 1, cv::LINE_AA);
+    }
 }
