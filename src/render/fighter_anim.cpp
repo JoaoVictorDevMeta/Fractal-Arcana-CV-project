@@ -350,13 +350,13 @@ namespace
             charge = {-2, -26, 6, 0.98f, 1.04f};
             release = {10, -16, -10, 1.02f, 1.02f};
             break;
-        case MoveStyle::Venegas: // posicao de sentido, depois a carga
-            charge = {-6, 0, 4, 0.97f, 1.06f};
-            release = {8, 0, -6, 1.f, 1.f};
+        case MoveStyle::Venegas: // recua o braco e empurra a palma: a integral sai da mao
+            charge = {-8, 0, 9, 0.97f, 1.04f};
+            release = {24, 0, -14, 1.05f, 0.96f};
             break;
-        case MoveStyle::Neri: // pulo girando, depois aponta
-            charge = {0, -12, 0, 1.f, 1.02f};
-            release = {20, 0, -14, 1.03f, 0.97f};
+        case MoveStyle::Neri: // ergue o celular para o ceu
+            charge = {0, -10, 10, 0.98f, 1.04f};
+            release = {6, -4, -4, 1.f, 1.02f};
             break;
         case MoveStyle::Baltar: // agacha juntando forca da terra
             charge = {-4, 0, 4, 1.07f, 0.88f};
@@ -395,34 +395,15 @@ namespace
 
         switch (s)
         {
-        case MoveStyle::Neri: // dois giros completos durante a carga
-        {
-            const float u = seg(t, 0.05f, 0.45f);
-            if (u > 0.f && u < 1.f)
-            {
-                float c = std::cos(4.f * kPi * u);
-                if (std::fabs(c) < 0.1f)
-                    c = c < 0.f ? -0.1f : 0.1f;
-                p.sx *= c;
-            }
-            break;
-        }
         case MoveStyle::Menegueti:
-        case MoveStyle::Subramana: // flutua oscilando
+        case MoveStyle::Subramana:
+        case MoveStyle::Neri: // flutua oscilando
             if (t > 0.2f && t < kSuperRecover)
                 p.dy += std::sin(t * 14.f) * 2.5f * U;
             break;
-        case MoveStyle::Venegas: // tres investidas, uma por disparo
-            for (int i = 0; i < 3; ++i)
-            {
-                const float a = kSuperRelease + 0.18f * i;
-                const float u = seg(t, a, a + 0.16f);
-                if (u > 0.f && u < 1.f)
-                {
-                    p.dx += 26.f * U * arc(u);
-                    p.lean -= 10.f * arc(u);
-                }
-            }
+        case MoveStyle::Venegas: // treme de esforco segurando a palma enquanto a onda avanca
+            if (t >= kSuperRelease && t < kSpecialAnimTime - 0.15f)
+                p.dx += hash11(int(t * 30.f), 77) * 1.5f * U;
             break;
         case MoveStyle::Baltar: // salta no disparo e pisa
         {
@@ -805,21 +786,57 @@ namespace
             }
             break;
 
-        case MoveStyle::Neri: // falha digital: retangulos coloridos piscando
-            if (L == Layer::Front && t < kSuperRecover)
+        case MoveStyle::Neri: // celular em chamas azuis lancando um feixe de luz para o ceu
+        {
+            const cv::Scalar deep(230, 110, 30), cyan(255, 225, 130), gold(60, 200, 250);
+            const cv::Point2f phone(c.body.x + c.f * 0.30f * c.h, c.body.y - 0.05f * c.h);
+            const float pw = 0.11f * c.h, ph = 0.19f * c.h;
+            if (L == Layer::Back && t > 0.12f && t < kSuperRecover + 0.1f) // feixe subindo do celular
             {
-                const cv::Scalar cols[4] = {{255, 220, 60}, {200, 60, 230}, {60, 230, 255}, {80, 220, 90}};
-                for (int i = 0; i < 7; ++i)
+                const float u = easeOut(seg(t, 0.12f, 0.40f));
+                const float fade = seg(t, kSuperRecover - 0.1f, kSuperRecover + 0.1f);
+                const int bw = std::max(c.px, int(c.h * (0.04f + 0.03f * u)));
+                const int top = int(phone.y - (phone.y + c.h) * u);
+                for (int y = int(phone.y); y > top && y > -c.px; y -= c.px)
+                    for (int x = -bw; x <= bw; x += c.px)
+                        if (visible(y * 31 + x, frame, fade))
+                            pix(c.view, phone.x + x, float(y), c.px,
+                                std::abs(x) < bw / 3 ? cv::Scalar(255, 255, 255) : (std::abs(x) < bw * 2 / 3 ? cyan : deep));
+            }
+            if (L == Layer::Front && t < kSuperRecover + 0.25f)
+            {
+                // chamas azuis em volta do celular
+                for (int i = 0; i < 12; ++i)
                 {
-                    if (hash01(i, frame + seed) < 0.45f)
-                        continue;
-                    const float x = c.body.x + hash11(i, frame + seed + 3) * 0.45f * c.h;
-                    const float y = c.body.y + hash11(i, frame + seed + 5) * 0.5f * c.h;
-                    const int w = c.px * (2 + int(hash01(i, frame + seed + 7) * 6));
-                    cv::rectangle(c.view, cv::Rect(int(x), int(y), w, c.px * 2), cols[i % 4], cv::FILLED);
+                    const float a = i * 2.f * kPi / 12.f;
+                    const float r = pw * (0.9f + 0.4f * hash01(i, frame));
+                    pix(c.view, phone.x + std::cos(a) * r, phone.y + std::sin(a) * r * 1.2f - hash01(i, frame + 1) * c.px * 2,
+                        c.px, i % 2 ? cyan : deep, 2);
+                }
+                // o celular: corpo escuro e tela brilhante
+                cv::rectangle(c.view, cv::Rect(int(phone.x - pw / 2), int(phone.y - ph / 2), int(pw), int(ph)),
+                              cv::Scalar(40, 30, 30), cv::FILLED);
+                cv::rectangle(c.view,
+                              cv::Rect(int(phone.x - pw / 2) + c.px, int(phone.y - ph / 2) + c.px,
+                                       std::max(1, int(pw) - 2 * c.px), std::max(1, int(ph) - 3 * c.px)),
+                              (frame % 2) ? cv::Scalar(255, 240, 180) : cyan, cv::FILLED);
+                // cruzinhas douradas e azuis subindo
+                for (int i = 0; i < 8; ++i)
+                {
+                    const float ph2 = std::fmod(t * 1.5f + hash01(i, seed), 1.f);
+                    const float x = c.body.x + hash11(i, seed + 2) * 0.5f * c.h;
+                    const float y = c.feet.y - ph2 * c.h * 1.1f;
+                    const cv::Scalar col = i % 2 ? gold : cyan;
+                    pix(c.view, x, y - c.px, c.px, col);
+                    pix(c.view, x - c.px, y, c.px, col);
+                    pix(c.view, x, y, c.px, col);
+                    pix(c.view, x + c.px, y, c.px, col);
+                    pix(c.view, x, y + c.px, c.px, col);
+                    pix(c.view, x, y + 2 * c.px, c.px, col);
                 }
             }
             break;
+        }
 
         case MoveStyle::Baltar: // trepadeiras crescendo do chao + folhas
             if (L == Layer::Back)
@@ -1081,16 +1098,6 @@ cv::Point drawFighter(cv::Mat &view, const cv::Mat &spr, int side, cv::Point fee
                 const Pose q = superPose(style, stepT(std::max(0.f, st.castT - 0.05f * k)), U, h);
                 drawPosed(view, spr, q, f, feet, fx.accent, 0.75f, 0.50f - 0.12f * k);
             }
-        // Neri: falha digital com canais de cor deslocados
-        if (style == MoveStyle::Neri && t < kSuperRecover && int(t * kAnimFps) % 3 != 2)
-        {
-            Pose g = p;
-            g.red = g.white = 0.f;
-            g.dx = p.dx + 4.f * U;
-            drawPosed(view, spr, g, f, feet, cv::Scalar(255, 230, 0), 0.9f, 0.45f);
-            g.dx = p.dx - 4.f * U;
-            drawPosed(view, spr, g, f, feet, cv::Scalar(230, 0, 230), 0.9f, 0.45f);
-        }
     }
 
     if (p.white > 0.f)

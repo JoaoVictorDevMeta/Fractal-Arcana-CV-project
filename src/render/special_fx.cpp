@@ -183,6 +183,336 @@ void drawSpecialProjectile(cv::Mat &view, SpecialKind k, cv::Point center, int d
     }
 }
 
+// ---------------------------------------------------------------------------
+// Baltar: Furia de Maxwell
+// ---------------------------------------------------------------------------
+void drawMaxwellTiger(cv::Mat &view, const std::vector<cv::Mat> &frames, int dir, float t,
+                      int xFrom, int xTo, int H, float time)
+{
+    if (frames.size() < 6 || H <= 8)
+        return;
+    const int px = std::max(2, H / 54);
+    const int dist = std::abs(xTo - xFrom);
+    const int spawn = xFrom + dir * int(dist * 0.14f);
+    const int strike = xTo - dir * int(H * 0.45f);
+
+    int idx = 0, x = spawn;
+    if (t < 0.30f) // gato -> explosao verde -> tigre surge na fumaca
+        idx = t < 0.10f ? 0 : (t < 0.20f ? 1 : 2);
+    else if (t < 0.88f) // corre ate o alvo alternando rugido e salto
+    {
+        const float u = seg(t, 0.30f, 0.88f);
+        x = spawn + int((strike - spawn) * u);
+        idx = (int(time * 8.f) % 2) ? 4 : 3;
+        for (int i = 0; i < 6; ++i) // poeira e folhas atras
+            pix(view, x - dir * (H * 0.35f + i * px * 3), H - 4 - px - hash01(i, int(time * 15)) * H * 0.12f, px,
+                i % 2 ? cv::Scalar(150, 170, 160) : cv::Scalar(60, 170, 70), 2);
+    }
+    else // garra
+    {
+        idx = 5;
+        x = strike + dir * int(H * 0.25f);
+    }
+
+    cv::Mat f = frames[idx];
+    if (f.rows > H - 4) // arena baixa: reduz o quadro
+    {
+        const double s = double(H - 4) / f.rows;
+        cv::resize(f, f, {}, s, s, cv::INTER_NEAREST);
+    }
+    drawSprite(view, f, {x, H - 4 - f.rows / 2});
+}
+
+// ---------------------------------------------------------------------------
+// Neri: Jesus Cristo!
+// ---------------------------------------------------------------------------
+namespace
+{
+    // cruzinha de pixels (as douradas e azuis que flutuam em volta)
+    void miniCross(cv::Mat &v, float x, float y, int px, const cv::Scalar &col)
+    {
+        pix(v, x, y - 2 * px, px, col);
+        pix(v, x, y - px, px, col);
+        pix(v, x - px, y - px, px, col);
+        pix(v, x + px, y - px, px, col);
+        pix(v, x, y, px, col);
+        pix(v, x, y + px, px, col);
+    }
+
+    // simbolo de wi-fi (arcos virados para cima)
+    void wifi(cv::Mat &v, float x, float y, int px, const cv::Scalar &col)
+    {
+        pix(v, x, y, px, col);
+        for (int a = 1; a <= 3; ++a)
+            for (float ang = -2.4f; ang <= -0.7f; ang += 0.35f / a)
+                pix(v, x + std::cos(ang) * a * px * 2.f, y + std::sin(ang) * a * px * 2.f, px, col);
+    }
+
+    // barra de luz em camadas: azul por fora, ciano, nucleo branco e filete dourado
+    void lightBar(cv::Mat &v, const cv::Rect &r, int px, float flash)
+    {
+        const cv::Scalar deep(230, 110, 30), cyan(255, 225, 130), white(255, 255, 255), gold(60, 200, 250);
+        auto shrink = [](cv::Rect a, int d) { return cv::Rect(a.x + d, a.y + d, std::max(1, a.width - 2 * d), std::max(1, a.height - 2 * d)); };
+        cv::rectangle(v, cv::Rect(r.x - px, r.y - px, r.width + 2 * px, r.height + 2 * px), deep, cv::FILLED);
+        cv::rectangle(v, r, flash > 0.5f ? white : cyan, cv::FILLED);
+        const int d = std::max(px, std::min(r.width, r.height) / 4);
+        cv::rectangle(v, shrink(r, d), white, cv::FILLED);
+        if (std::min(r.width, r.height) > 6 * px)
+            cv::rectangle(v, shrink(r, d / 2), gold, std::max(1, px / 2));
+    }
+} // namespace
+
+void drawHolyCross(cv::Mat &view, int xTarget, float t, int H, float time)
+{
+    const int px = std::max(2, H / 60);
+    const int ground = H - 4;
+    const float tq = stepT(t * 1.3f, 15.f) / 1.3f; // em "quadros" de 15 qps
+    const cv::Scalar white(255, 255, 255), cyan(255, 225, 130), gold(60, 200, 250);
+    const int frame = int(time * 15.f);
+    const float cx = float(xTarget);
+    const float armY = H * 0.36f;
+
+    // A) feixe de luz descendo do ceu
+    if (tq < 0.25f)
+    {
+        const float a = easeOut(seg(tq, 0.f, 0.2f));
+        const int w = std::max(px, int(H * 0.05f));
+        lightBar(view, cv::Rect(int(cx) - w / 2, 0, w, std::max(1, int(ground * a))), px, 0.f);
+    }
+
+    // B/C) a cruz cresce e brilha
+    const float b = easeOut(seg(tq, 0.18f, 0.70f));
+    const float flash = (tq > 0.70f && tq < 0.85f) ? 1.f : 0.f;
+    if (tq >= 0.18f && tq < 0.85f)
+    {
+        const int vw = std::max(px, int((0.035f + 0.045f * b) * H));
+        const int hl = int(b * 0.55f * H);
+        const int hh = std::max(px, int(vw * 0.9f));
+        lightBar(view, cv::Rect(int(cx) - vw, 0, 2 * vw, ground), px, flash);
+        if (hl > vw)
+            lightBar(view, cv::Rect(int(cx) - hl, int(armY) - hh, 2 * hl, 2 * hh), px, flash);
+        // estrela no cruzamento
+        for (int r = 0; r < 8; ++r)
+        {
+            const float ang = r * kPi / 4.f + tq * 2.f;
+            const float len = (0.15f + 0.25f * b) * H * (r % 2 ? 0.6f : 1.f);
+            pixLine(view, {cx, armY}, {cx + std::cos(ang) * len, armY + std::sin(ang) * len}, px, r % 2 ? gold : white);
+        }
+        // cruzinhas e sinais de wi-fi flutuando
+        for (int i = 0; i < 10; ++i)
+        {
+            const float ph = std::fmod(time * 0.6f + hash01(i, 3), 1.f);
+            const float x = cx + hash11(i, 5) * H * 0.75f;
+            const float y = ground - ph * H * 0.9f;
+            if (i % 4 == 3)
+                wifi(view, x, y, std::max(1, px / 2), cyan);
+            else
+                miniCross(view, x, y, std::max(1, px * 2 / 3), i % 2 ? gold : cyan);
+        }
+    }
+
+    // D) a cruz se desfaz em pixels que voam para fora
+    if (tq >= 0.85f)
+    {
+        const float u = seg(tq, 0.85f, 1.f);
+        const int vw = int(0.08f * H), hl = int(0.55f * H), hh = int(vw * 0.9f);
+        int id = 0;
+        for (int y = 0; y < ground; y += px * 2)
+            for (int x = -vw; x < vw; x += px * 2, ++id)
+                if (visible(id, frame, u))
+                    pix(view, cx + x + hash11(id, 1) * u * H * 0.5f, y + hash11(id, 2) * u * H * 0.2f, px,
+                        id % 3 ? cyan : white);
+        for (int x = -hl; x < hl; x += px * 2)
+            for (int y = -hh; y < hh; y += px * 2, ++id)
+                if (visible(id, frame, u))
+                    pix(view, cx + x + hash11(id, 1) * u * H * 0.5f, armY + y + hash11(id, 2) * u * H * 0.3f, px,
+                        id % 3 ? cyan : gold);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Venegas: La integral es la soma de las partes!
+// ---------------------------------------------------------------------------
+namespace
+{
+    cv::Scalar mix(const cv::Scalar &a, const cv::Scalar &b, double u)
+    {
+        return cv::Scalar(a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u);
+    }
+
+    // degrade das barras: azul -> roxo -> branco -> vermelho (as cores da faixa do Venegas)
+    cv::Scalar barColor(float u)
+    {
+        const cv::Scalar c[4] = {{210, 90, 40}, {200, 60, 150}, {235, 225, 240}, {60, 60, 220}};
+        u = clamp01(u) * 3.f;
+        const int i = std::min(2, int(u));
+        return mix(c[i], c[i + 1], u - i);
+    }
+
+    void glyph(cv::Mat &v, const char *const *rows, int nRows, float x, float y, int px, const cv::Scalar &col)
+    {
+        for (int r = 0; r < nRows; ++r)
+            for (int c = 0; rows[r][c]; ++c)
+                if (rows[r][c] == 'X')
+                {
+                    pix(v, x + c * px + px / 2, y + r * px + px / 2, px, cv::Scalar(20, 40, 60)); // sombra
+                    pix(v, x + c * px, y + r * px, px, col);
+                }
+    }
+} // namespace
+
+void drawIntegralWave(cv::Mat &view, int xFrom, int xTo, float front01, int H, float time)
+{
+    if (front01 <= 0.f)
+        return;
+    const int dir = xTo >= xFrom ? 1 : -1;
+    const int px = std::max(2, H / 60);
+    const int ground = H - 4;
+    const float start = float(xFrom + dir * int(H * 0.28f)); // sai da mao do Venegas
+    const float end = float(xTo - dir * int(H * 0.15f));
+    const float L = std::abs(end - start);
+    if (L < 4.f)
+        return;
+    front01 = clamp01(front01);
+    const float reach = L * front01;
+    auto curveY = [&](float d) // d = distancia percorrida a partir de 'start'
+    {
+        const float u = d / L;
+        const float y = ground - H * (0.30f + 0.20f * std::sin(u * 2.f * kPi * 1.25f - 0.6f) + 0.22f * u);
+        return std::max(H * 0.08f, y);
+    };
+
+    // barras da soma de Riemann (as "partes")
+    const int N = 8;
+    const float bw = L / N;
+    for (int i = 0; i < N; ++i)
+    {
+        const float d0 = i * bw;
+        if (d0 >= reach)
+            break;
+        const float w = std::min(bw, reach - d0) - px;
+        if (w < px)
+            continue;
+        const float top = curveY(d0 + bw * 0.5f);
+        const cv::Scalar col = barColor(float(i) / (N - 1));
+        const int xa = int(start + dir * d0), xb = int(start + dir * (d0 + w));
+        const cv::Rect r(std::min(xa, xb), int(top), std::abs(xb - xa), std::max(1, ground - int(top)));
+        cv::rectangle(view, r, col * 0.55, cv::FILLED);
+        cv::rectangle(view, cv::Rect(r.x + px, r.y + px, std::max(1, r.width / 3), std::max(1, r.height - px)), col,
+                      cv::FILLED); // reflexo
+        cv::rectangle(view, cv::Rect(r.x, r.y, r.width, px), cv::Scalar(255, 255, 255), cv::FILLED);
+        for (int s = 0; s < 4; ++s) // brilhos dentro da barra
+            pix(view, r.x + hash01(i * 7 + s, int(time * 10)) * r.width, r.y + hash01(i * 5 + s, int(time * 10) + 1) * r.height,
+                px, lighten(col, 0.6));
+    }
+
+    // a curva f(x), ate a frente da onda
+    cv::Point2f prev(start, curveY(0.f));
+    for (float d = float(px); d <= reach; d += px)
+    {
+        const cv::Point2f cur(start + dir * d, curveY(d));
+        pixLine(view, prev + cv::Point2f(0.f, float(px)), cur + cv::Point2f(0.f, float(px)), px, cv::Scalar(255, 160, 50));
+        pixLine(view, prev, cur, px, cv::Scalar(255, 245, 200));
+        prev = cur;
+    }
+
+    // centelhas na ponta e simbolos dourados acima
+    const cv::Point2f tip(start + dir * reach, curveY(reach));
+    for (int i = 0; i < 8; ++i)
+        pix(view, tip.x + hash11(i, int(time * 15)) * H * 0.08f, tip.y + hash11(i + 9, int(time * 15)) * H * 0.08f, px,
+            i % 2 ? cv::Scalar(255, 255, 255) : cv::Scalar(255, 210, 120));
+    static const char *sigma[7] = {"XXXXX", "X....", ".X...", "..X..", ".X...", "X....", "XXXXX"};
+    static const char *integ[9] = {"..XX", ".X..", ".X..", ".X..", ".X..", ".X..", ".X..", ".X..", "XX.."};
+    const cv::Scalar gold(60, 200, 250);
+    const int gp = std::max(2, px);
+    const float gy = std::max(2.f, tip.y - H * 0.30f) + std::sin(time * 6.f) * px;
+    glyph(view, sigma, 7, tip.x - dir * H * 0.25f, gy, gp, gold);
+    glyph(view, integ, 9, tip.x - dir * H * 0.25f + 7 * gp, gy - gp, gp, gold);
+    cv::putText(view, "f(x)dx", {int(tip.x - dir * H * 0.25f + 12 * gp), int(gy + 6 * gp)}, cv::FONT_HERSHEY_SIMPLEX,
+                std::max(0.35, H / 400.0), gold, 1, cv::LINE_AA);
+}
+
+// ---------------------------------------------------------------------------
+// Derzu: bug na tela acompanhando o poder
+// ---------------------------------------------------------------------------
+void drawScreenBug(cv::Mat &img, int cx, float time, int seed)
+{
+    if (img.empty())
+        return;
+    const int W = img.cols, H = img.rows;
+    const int bw = std::max(40, W * 9 / 100);
+    const cv::Rect band = cv::Rect(cx - bw, 0, 2 * bw, H) & cv::Rect(0, 0, W, H);
+    if (band.width < 8)
+        return;
+    const int frame = int(time * 20.f) + seed * 1000;
+
+    // 1) cores separadas: azul para a esquerda, vermelho para a direita
+    {
+        cv::Mat roi = img(band);
+        std::vector<cv::Mat> ch;
+        cv::split(roi, ch);
+        const int s = 3 + int(hash01(frame, 1) * 6);
+        if (s < band.width)
+        {
+            for (int c : {0, 2})
+            {
+                cv::Mat shifted = ch[c].clone();
+                const int w = band.width - s;
+                if (c == 0)
+                    ch[c](cv::Rect(s, 0, w, H)).copyTo(shifted(cv::Rect(0, 0, w, H)));
+                else
+                    ch[c](cv::Rect(0, 0, w, H)).copyTo(shifted(cv::Rect(s, 0, w, H)));
+                ch[c] = shifted;
+            }
+            cv::merge(ch, roi);
+        }
+    }
+
+    // 2) linhas rasgadas: faixas horizontais deslocadas
+    for (int i = 0; i < 9; ++i)
+    {
+        if (hash01(i, frame) < 0.35f)
+            continue;
+        const int y = int(hash01(i, frame + 1) * (H - 4));
+        const int h = 3 + int(hash01(i, frame + 2) * 16);
+        const int dx = int(hash11(i, frame + 3) * 40);
+        const cv::Rect src = cv::Rect(band.x, y, band.width, h) & cv::Rect(0, 0, W, H);
+        const cv::Rect dst = cv::Rect(src.x + dx, src.y, src.width, src.height) & cv::Rect(0, 0, W, H);
+        if (src.empty() || dst.empty())
+            continue;
+        const cv::Mat piece = img(src).clone();
+        piece(cv::Rect(dst.x - (src.x + dx), 0, dst.width, dst.height)).copyTo(img(dst));
+    }
+
+    // 3) blocos corrompidos
+    const cv::Scalar bad[4] = {{255, 0, 255}, {0, 255, 0}, {0, 0, 0}, {255, 255, 0}};
+    for (int i = 0; i < 12; ++i)
+    {
+        if (hash01(i, frame + 7) < 0.4f)
+            continue;
+        const int x = cx + int(hash11(i, frame + 8) * bw * 1.3f);
+        const int y = int(hash01(i, frame + 9) * H);
+        const int w = 6 + int(hash01(i, frame + 10) * 40), h = 3 + int(hash01(i, frame + 11) * 10);
+        cv::rectangle(img, cv::Rect(x, y, w, h), bad[i % 4], cv::FILLED);
+    }
+
+    // 4) linhas de varredura escuras
+    for (int y = int(time * 60.f) % 3; y < H; y += 3)
+        cv::line(img, {band.x, y}, {band.br().x, y}, cv::Scalar(0, 0, 0), 1);
+
+    // 5) mensagens de erro
+    static const char *msgs[] = {"0xDEADBEEF", "Segmentation fault", "core dumped", "NullPointerException",
+                                 "undefined behavior", "ERRO 404", "stack overflow", "int main() {"};
+    for (int i = 0; i < 2; ++i)
+    {
+        const char *m = msgs[int(hash01(i, frame / 3) * 7.99f)];
+        const int x = cx - bw + int(hash01(i + 4, frame / 3) * bw);
+        const int y = 12 + int(hash01(i + 6, frame / 3) * (H - 24));
+        cv::putText(img, m, {x + 1, y + 1}, cv::FONT_HERSHEY_PLAIN, 1.0, cv::Scalar(0, 0, 0), 2);
+        cv::putText(img, m, {x, y}, cv::FONT_HERSHEY_PLAIN, 1.0, cv::Scalar(90, 255, 90), 1);
+    }
+}
+
 void drawSuperCutIn(cv::Mat &img, int side, float t, const cv::Mat &portrait,
                     const std::string &charName, SpecialKind k)
 {
@@ -250,11 +580,15 @@ void drawSuperCutIn(cv::Mat &img, int side, float t, const cv::Mat &portrait,
     const SpecialDef &sd = specialDef(k);
     const double big = std::clamp(bh / 95.0, 0.7, 1.8);
     const std::string name = sd.name;
-    const cv::Size ns = textSize(name, cv::FONT_HERSHEY_DUPLEX, big, 2);
+    // nomes longos ("La integral es la soma de las partes!") encolhem para caber ao lado do retrato
+    const int availW = side == 0 ? W - pr.br().x - W / 30 - W / 25 : pr.x - W / 30 - W / 25;
+    cv::Size ns = textSize(name, cv::FONT_HERSHEY_DUPLEX, big, 2);
+    const double nameScale = (ns.width > availW && ns.width > 0) ? std::max(0.4, big * availW / ns.width) : big;
+    ns = textSize(name, cv::FONT_HERSHEY_DUPLEX, nameScale, 2);
     const int textX = side == 0 ? pr.br().x + W / 30 : pr.x - W / 30 - ns.width;
     outlinedText(img, "ESPECIAL!", {textX, top + bh * 28 / 100}, cv::FONT_HERSHEY_DUPLEX, big * 0.5,
                  lighten(accent, 0.3), 1);
-    outlinedText(img, name, {textX, cy + ns.height / 2}, cv::FONT_HERSHEY_DUPLEX, big, cv::Scalar(255, 255, 255), 2);
+    outlinedText(img, name, {textX, cy + ns.height / 2}, cv::FONT_HERSHEY_DUPLEX, nameScale, cv::Scalar(255, 255, 255), 2);
     outlinedText(img, charName, {textX, bot - bh * 14 / 100}, cv::FONT_HERSHEY_SIMPLEX, big * 0.5,
                  cv::Scalar(220, 220, 230), 1);
 }

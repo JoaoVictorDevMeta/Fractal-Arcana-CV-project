@@ -19,6 +19,8 @@ namespace pfx
         return (h & 0xFFFF) / 65535.f * 2.f - 1.f;
     }
     inline float hash01(int a, int b) { return 0.5f + 0.5f * hash11(a, b); }
+    // Dissolve em pixels: o bloco i some quando 'fade' (0..1) passa do seu limiar.
+    inline bool visible(int i, int seed, float fade) { return hash01(i, seed) >= fade; }
     inline float clamp01(float v) { return std::clamp(v, 0.f, 1.f); }
     inline float seg(float t, float a, float b) { return clamp01((t - a) / (b - a)); }
     inline float easeOut(float u)
@@ -93,6 +95,40 @@ namespace pfx
     {
         cv::putText(img, s, org, font, scale, outline, thick + 4, cv::LINE_AA);
         cv::putText(img, s, org, font, scale, fg, thick, cv::LINE_AA);
+    }
+
+    // Fonte de fliperama 3x5 em blocos (digitos, 'P', 'X', ':' e espaco), para o placar.
+    inline const char *pixelGlyph(char c)
+    {
+        switch (c)
+        {
+        case '0': return "XXXX.XX.XX.XXXX";
+        case '1': return ".X.XX..X..X.XXX";
+        case '2': return "XXX..XXXXX..XXX";
+        case '3': return "XXX..X.XX..XXXX";
+        case '4': return "X.XX.XXXX..X..X";
+        case '5': return "XXXX..XXX..XXXX";
+        case '6': return "XXXX..XXXX.XXXX";
+        case '7': return "XXX..X..X..X..X";
+        case '8': return "XXXX.XXXXX.XXXX";
+        case '9': return "XXXX.XXXX..XXXX";
+        case 'P': return "XXXX.XXXXX..X..";
+        case 'X': return "X.XX.X.X.X.XX.X";
+        case ':': return "....X.....X....";
+        default: return "...............";
+        }
+    }
+    inline int pixelTextWidth(const std::string &s, int px) { return int(s.size()) * 4 * px - px; }
+    inline void pixelText(cv::Mat &v, const std::string &s, cv::Point tl, int px, const cv::Scalar &col)
+    {
+        for (size_t i = 0; i < s.size(); ++i)
+        {
+            const char *g = pixelGlyph(s[i]);
+            for (int k = 0; k < 15; ++k)
+                if (g[k] == 'X')
+                    cv::rectangle(v, cv::Rect(tl.x + int(i) * 4 * px + (k % 3) * px, tl.y + (k / 3) * px, px, px), col,
+                                  cv::FILLED);
+        }
     }
 
     inline cv::Size textSize(const std::string &s, int font, double scale, int thick)

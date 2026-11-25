@@ -505,6 +505,31 @@ bool Assets::load(const std::string &dir,
         loadSlot(SpellType::AtaqueEspecial, "especial_" + id + ".png", 32, 180, 220, cv::Mat(), defEspecial, defEspecialF);
         // sem arte propria, o especial e desenhado em pixel art pelo codigo (render/special_fx)
         customSpecial[p] = !cv::imread(spells + "especial_" + id + ".png", cv::IMREAD_UNCHANGED).empty();
+
+        // especial animado em quadros (tira horizontal). Quantidade de quadros por personagem:
+        specialFrames[p].clear();
+        const int nFrames = (id == "baltar") ? 6 : 0;
+        if (nFrames > 0)
+        {
+            cv::Mat strip = cv::imread(spells + "especial_" + id + "_frames.png", cv::IMREAD_UNCHANGED);
+            if (!strip.empty() && strip.channels() == 3)
+                cv::cvtColor(strip, strip, cv::COLOR_BGR2BGRA);
+            if (!strip.empty() && strip.channels() == 4 && strip.cols >= nFrames)
+            {
+                const int cw = strip.cols / nFrames;
+                const double s = 180.0 / strip.rows; // altura final do quadro na arena
+                for (int i = 0; i < nFrames; ++i)
+                {
+                    cv::Mat f;
+                    // vizinho mais proximo: nitido e sem misturar a cor do fundo transparente
+                    cv::resize(strip(cv::Rect(i * cw, 0, cw, strip.rows)), f, {}, s, s, cv::INTER_NEAREST);
+                    if (p == 1)
+                        cv::flip(f, f, 1); // P2 ataca para a esquerda
+                    specialFrames[p].push_back(f);
+                }
+                std::fprintf(stdout, "OK especial_%s_frames.png (%d quadros)\n", id.c_str(), nFrames);
+            }
+        }
     }
 
     for (int p = 0; p < 2; ++p)

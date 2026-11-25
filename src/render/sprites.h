@@ -51,6 +51,9 @@ struct Assets
     cv::Scalar trailColor[2] = {cv::Scalar(255, 220, 120), cv::Scalar(255, 220, 120)}; // cor do rastro do raio (BGR)
     std::string charId[2];                                                             // personagem de cada lado (define o golpe especial)
     bool customSpecial[2] = {false, false};                                            // existe especial_<id>.png? (senao: pixel art do codigo)
+    // Quadros do especial animado (especial_<id>_frames.png: tira horizontal de quadros iguais),
+    // ja virados para o lado do jogador. Ex.: o tigre da "Furia de Maxwell" do Baltar.
+    std::vector<cv::Mat> specialFrames[2];
 
     // p1Id / p2Id: prefixo do personagem (ex: "derzu", "baltar") —
     // os arquivos esperados sao "sprites/players/<id>_player.png" e

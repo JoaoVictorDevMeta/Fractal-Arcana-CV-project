@@ -61,10 +61,14 @@ void Match::hit_(const Projectile &pr)
             if (--target.shieldBlocks == 0)
                 target.shieldTime = 0.f;
             say_(1 - pr.owner, CombatTextKind::Blocked, "BLOQUEADO!");
+            score_[1 - pr.owner] += 50;
             return;
         }
+        score_[pr.owner] += 100; // perfurou o escudo
     }
 
+    const float dealt = std::min(pr.damage, std::max(0.f, target.health));
+    score_[pr.owner] += int(dealt * 10.f + 0.5f) + (special ? 150 : 0);
     target.health -= pr.damage;
     target.hitFlash = kHitFlashTime;
     say_(1 - pr.owner, CombatTextKind::Damage, "-" + std::to_string(int(pr.damage + 0.5f)));
@@ -160,10 +164,22 @@ void Match::update(double dtd)
     {
         state_ = MatchState::Player1Won;
         players[0].koTime = 0.f;
+        koBonus_(1);
     }
     else if (players[1].health <= 0.f)
     {
         state_ = MatchState::Player0Won;
         players[1].koTime = 0.f;
+        koBonus_(0);
     }
+}
+
+void Match::koBonus_(int w)
+{
+    int bonus = 1000;
+    bonus += std::max(0, int(90.f - time_)) * 20; // vitoria rapida
+    if (players[w].health >= kStartHealth)
+        bonus += 500; // vitoria perfeita
+    score_[w] += bonus;
+    say_(w, CombatTextKind::Heal, "+" + std::to_string(bonus) + " K.O.!");
 }

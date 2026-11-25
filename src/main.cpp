@@ -110,6 +110,27 @@ int main(int argc, char **argv)
     float statusAge[2] = {99.f, 99.f};     // segundos desde o ultimo gesto
     CombatSide side[2];                    // nome/retrato/especial de cada jogador na luta
     Match match;
+    bool matchRecorded = false; // o placar desta partida ja foi enviado para a tela inicial?
+    // Guarda o placar da partida atual como "ultima partida" (mostrada na tela inicial).
+    auto recordMatch = [&]()
+    {
+        LastMatch lm;
+        lm.valid = true;
+        for (int p = 0; p < 2; ++p)
+        {
+            lm.name[p] = side[p].name;
+            lm.score[p] = match.score(p);
+        }
+        lm.winner = match.winner();
+        menu.setLastMatch(lm);
+        matchRecorded = true;
+    };
+    // Reiniciar (R) no meio do duelo: a partida jogada tambem conta como a ultima.
+    auto recordIfPlayed = [&]()
+    {
+        if (menu.screen() == GameScreen::DuelReady && !matchRecorded && match.time() > kIntroTime)
+            recordMatch();
+    };
     Assets assets;
     bool assetsLoaded = false;
     bool debug = false;
@@ -123,6 +144,7 @@ int main(int argc, char **argv)
         if (!cam.read(frame))
             break;
         mouseCtx.size = frame.size();
+        const GameScreen screenAtStart = menu.screen();
 
         const double dt = frameTimer.tick();
         const double nowSec = frameTimer.now();
@@ -203,6 +225,7 @@ int main(int argc, char **argv)
                     statusAge[p] = 99.f;
                 }
                 match.reset();
+                matchRecorded = false;
             }
             if (!paused)
             {
@@ -210,6 +233,9 @@ int main(int argc, char **argv)
                 matchDt += (std::min(dt, 0.1) - matchDt) * 0.2;
                 match.update(matchDt);
             }
+            // nocaute: guarda o placar para a tela inicial
+            if (!matchRecorded && match.state() != MatchState::Running)
+                recordMatch();
         }
         else
         {
@@ -279,6 +305,13 @@ int main(int argc, char **argv)
                 if (a.castType == SpellType::AtaqueEspecial && a.castT >= 0.f && a.koT < 0.f)
                     drawSuperCutIn(upper, p, a.castT, side[p].portrait, side[p].name, side[p].special);
             }
+
+            // Derzu: o especial "bugga" a tela numa faixa que acompanha o bloco de codigo
+            // (usa o relogio da partida: com o jogo pausado, o bug congela junto)
+            for (const Projectile &pr : match.projectiles())
+                if (pr.type == SpellType::AtaqueEspecial && pr.special == SpecialKind::ChuvaDeCodigo &&
+                    pr.t >= 0.f && pr.t < 1.f)
+                    drawScreenBug(display, arenaProjectileX(pr, width), match.time(), pr.owner);
             if (paused)
                 drawPausedOverlay(display);
             cv::imshow(camWin, display);
@@ -290,8 +323,10 @@ int main(int argc, char **argv)
             break;
         if (k == 'r' || k == 'R')
         {
+            recordIfPlayed();
             menu.resetSelection();
             match.reset();
+            matchRecorded = false;
         }
         if (k == ' ')
             paused = !paused;
@@ -311,6 +346,11 @@ int main(int argc, char **argv)
             match.cast(1, static_cast<Shape>(k - '6'));
         if (k == '0')
             match.cast(1, Shape::Estrela);
+
+        // saiu do duelo (tecla M ou clique em "Menu") antes do nocaute: a partida tambem conta
+        if (screenAtStart == GameScreen::DuelReady && menu.screen() != GameScreen::DuelReady && !matchRecorded &&
+            match.time() > kIntroTime)
+            recordMatch();
     }
 
     cam.close();

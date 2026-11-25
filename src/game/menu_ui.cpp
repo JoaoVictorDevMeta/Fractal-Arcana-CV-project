@@ -1135,6 +1135,78 @@ void MenuUI::drawTitleScreen_(cv::Mat &frame) const
                         cv::FONT_HERSHEY_DUPLEX, 0.7,
                         on ? titlePurple : cv::Scalar(150, 130, 150), 1);
     }
+
+    drawLastMatch_(frame);
+}
+
+// Placar da ultima partida, entre o logo e os botoes (ou no canto, se nao couber).
+void MenuUI::drawLastMatch_(cv::Mat &frame) const
+{
+    if (!lastMatch_.valid)
+        return;
+    const int W = frame.cols, H = frame.rows;
+    const int FD = cv::FONT_HERSHEY_DUPLEX;
+    const double k = std::clamp(H / 720.0, 0.6, 1.6);
+    const cv::Scalar white(245, 240, 250), gold(90, 210, 250), digits(120, 235, 255);
+
+    const int gapTop = titleFrameRect_.br().y + H * 3 / 100;
+    const int gapBot = btnPlayRect_.y - H * 4 / 100;
+    int ph = std::min(gapBot - gapTop, int(120 * k));
+    cv::Rect r;
+    if (ph >= int(80 * k))
+        r = cv::Rect(W * 24 / 100, gapTop + (gapBot - gapTop - ph) / 2, W * 52 / 100, ph);
+    else
+    {
+        ph = int(110 * k);
+        r = cv::Rect(W / 60, H / 40 + int(14 * k), W * 34 / 100, ph);
+    }
+
+    ui::panel(frame, r, gold, 0.85);
+    ui::panelTitle(frame, r, "ULTIMA PARTIDA", gold, 0.55 * k);
+
+    const int half = r.width / 2;
+    const int px = std::max(3, ph / 18);
+    for (int p = 0; p < 2; ++p)
+    {
+        const cv::Rect hr(r.x + p * half, r.y, half, r.height);
+        const cv::Scalar pc = ui::playerColor(p);
+        const bool won = lastMatch_.winner == p;
+
+        // "1P Nome"
+        const std::string tag = p == 0 ? "1P" : "2P";
+        const std::string &name = lastMatch_.name[p];
+        const double ns = ui::fitScale(name, FD, 0.6 * k, 1, hr.width - 4 * px * 2 - 30);
+        const cv::Size nz = pfx::textSize(name, FD, ns, 1);
+        const int rowW = pfx::pixelTextWidth(tag, px) + 8 + nz.width;
+        const int nameY = hr.y + ph * 40 / 100;
+        const int x0 = hr.x + (hr.width - rowW) / 2;
+        pfx::pixelText(frame, tag, {x0, nameY - 5 * px}, px, pc);
+        pfx::outlinedText(frame, name, {x0 + pfx::pixelTextWidth(tag, px) + 8, nameY}, FD, ns, white, 1);
+
+        // pontuacao em digitos de fliperama
+        const std::string sc = cv::format("%06d", lastMatch_.score[p]);
+        const int big = px * 3 / 2;
+        const int sw = pfx::pixelTextWidth(sc, big);
+        const cv::Point stl(hr.x + (hr.width - sw) / 2, nameY + int(10 * k));
+        pfx::pixelText(frame, sc, stl + cv::Point(big / 2, big / 2), big, cv::Scalar(20, 10, 25));
+        pfx::pixelText(frame, sc, stl, big, won ? gold : digits);
+
+        if (won)
+        {
+            const std::string w = "VENCEU!";
+            const cv::Size wz = pfx::textSize(w, FD, 0.5 * k, 1);
+            const int wy = stl.y + 5 * big + int(22 * k);
+            ui::drawStar(frame, {hr.x + (hr.width - wz.width) / 2 - int(14 * k), wy - wz.height / 2}, int(8 * k), gold);
+            pfx::outlinedText(frame, w, {hr.x + (hr.width - wz.width) / 2, wy}, FD, 0.5 * k, gold, 1);
+        }
+    }
+    // divisoria com "X" no meio
+    cv::line(frame, {r.x + half, r.y + 14}, {r.x + half, r.br().y - 10}, gold * 0.5, 1);
+    const int xw = pfx::pixelTextWidth("X", px);
+    pfx::pixelText(frame, "X", {r.x + half - xw / 2, r.y + ph / 2 - 2 * px}, px, gold);
+    if (lastMatch_.winner < 0)
+        putCenteredText(frame, "partida interrompida", {r.x, r.br().y - int(24 * k), r.width, int(20 * k)},
+                        cv::FONT_HERSHEY_SIMPLEX, 0.42 * k, cv::Scalar(200, 185, 205), 1);
 }
 
 // Halo branco atras de uma caixa (mesmo efeito dos botoes do menu): fraco em repouso,
@@ -1459,9 +1531,7 @@ void MenuUI::drawCharacterPreview_(cv::Mat &frame, int p) const
     const double ns = ui::fitScale(c.name, FD, 0.75 * k, 2, textW);
     const cv::Size nsz = pfx::textSize(c.name, FD, ns, 2);
     pfx::outlinedText(frame, c.name, {cx - nsz.width / 2, y}, FD, ns, white, 2);
-    y += int(24 * k);
-    putCenteredText(frame, c.title, {r.x, y - int(14 * k), r.width, int(18 * k)}, F, 0.45 * k, soft, 1);
-    y += int(18 * k);
+    y += int(20 * k);
     cv::line(frame, {r.x + 18, y}, {r.br().x - 18, y}, pc * 0.5, 1);
     y += int(26 * k);
 
@@ -1572,9 +1642,7 @@ void MenuUI::drawCharacterSelect_(cv::Mat &frame) const
         const cv::Rect plate(ir.x, ir.br().y - plateH, ir.width, plateH);
         ui::fillTranslucent(frame, plate, cv::Scalar(12, 8, 18), 0.78);
         const double ns = ui::fitScale(c.name, FD, 0.6 * k, 1, plate.width - 12);
-        putCenteredText(frame, c.name, {plate.x, plate.y + 2, plate.width, plate.height * 55 / 100}, FD, ns, white, 1);
-        putCenteredText(frame, c.title, {plate.x, plate.y + plate.height * 50 / 100, plate.width, plate.height * 45 / 100},
-                        F, ui::fitScale(c.title, F, 0.4 * k, 1, plate.width - 12), soft, 1);
+        putCenteredText(frame, c.name, plate, FD, ns, white, 1);
 
         // progresso do desenho de cada jogador (P1 laranja, P2 verde)
         for (int p = 0; p < 2; ++p)

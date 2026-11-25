@@ -32,9 +32,19 @@ struct CharacterDef
     cv::Mat preview[2]; // corpo inteiro para o painel lateral de P1 (0) e P2 (1, espelhado)
 };
 
+// Resultado da ultima partida, mostrado na tela inicial.
+struct LastMatch
+{
+    bool valid = false;
+    std::string name[2];
+    int score[2] = {0, 0};
+    int winner = -1; // -1 = partida interrompida antes do nocaute
+};
+
 class MenuUI
 {
 public:
+    void setLastMatch(const LastMatch &lm) { lastMatch_ = lm; }
     MenuUI();
 
     bool loadCharacters(const std::string &assetsDir = "assets");
@@ -152,6 +162,8 @@ private:
     cv::Rect previewRect_[2];    // paineis laterais da selecao (P1 esquerda, P2 direita)
     cv::Rect selectHeader_;
     cv::Rect selectFooter_;
+    LastMatch lastMatch_;
+    void drawLastMatch_(cv::Mat &frame) const;
     int hoveredCard_(cv::Point pt) const;
     void drawCharacterPreview_(cv::Mat &frame, int p) const;
     cv::Point2f lastWandPos_[2]{{0.f, 0.f}, {0.f, 0.f}};
