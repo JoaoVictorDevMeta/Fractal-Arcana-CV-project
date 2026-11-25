@@ -25,10 +25,9 @@ bool App::init()
 
     menu_.loadCharacters("assets");
 
-    // placar do ultimo combate salvo na sessao anterior
-    LastMatch last;
-    if (scores_.load(last))
-        menu_.setLastMatch(last);
+    // tabela de recordes com os combates das sessoes anteriores
+    scores_.load();
+    menu_.setScoreboard(scores_.recentBest(5));
 
     cv::namedWindow(kWindow, cv::WINDOW_NORMAL);
     cv::resizeWindow(kWindow, 960, 600);
@@ -41,7 +40,7 @@ int App::run()
     while (step_())
     {
     }
-    saveScore_();
+    finishMatch_(); // camera fechou ou ESC no meio do duelo: o combate tambem fica salvo
     cam_.close();
     return 0;
 }
@@ -85,9 +84,9 @@ bool App::step_()
     if (!handleKey_(cv::waitKey(1)))
         return false;
 
-    // saiu do duelo (tecla M ou clique em "Menu") antes do nocaute: a partida tambem conta
+    // saiu do duelo (tecla M ou clique em "Menu"): o combate e salvo mesmo sem registro
     if (wasInDuel && menu_.screen() != GameScreen::DuelReady)
-        recordIfPlayed_();
+        finishMatch_();
     return true;
 }
 
@@ -115,6 +114,7 @@ void App::updateDuel_(double dt)
         duel_.begin(menu_, match_, assets_);
         inDuel_ = true;
         matchRecorded_ = false;
+        entry_.reset();
     }
     if (!paused_)
     {
@@ -123,7 +123,7 @@ void App::updateDuel_(double dt)
         match_.update(matchDt_);
     }
     if (!matchRecorded_ && match_.state() != MatchState::Running) // nocaute
-        recordMatch_();
+        onKnockout_();
 }
 
 void App::present_()
@@ -138,6 +138,7 @@ void App::present_()
     }
     cv::Mat display;
     duel_.render(display, frame_, game_, match_, assets_, debug_, menu_.glowEnabled());
+    entry_.draw(display, float(timer_.now())); // registro de 3 letras depois do K.O.
     if (paused_)
         ui::pausedOverlay(display);
     cv::imshow(kWindow, display);
@@ -145,17 +146,28 @@ void App::present_()
 
 bool App::handleKey_(int key)
 {
+    // registrando o combate: as letras vao para o registro (R, M e D nao funcionam ate o Enter)
+    if (entry_.typing() && key >= 0 && key != 27)
+    {
+        bool confirmed = false;
+        entry_.handleKey(key, confirmed);
+        if (confirmed)
+            savePending_(entry_.id());
+        return true;
+    }
+
     switch (key)
     {
-    case 27: // ESC: sai (o placar e salvo em run())
-        recordIfPlayed_();
+    case 27: // ESC: salva o combate em andamento (ou o registro digitado) e sai
+        finishMatch_();
         return false;
     case 'r':
     case 'R':
-        recordIfPlayed_();
+        finishMatch_();
         menu_.resetSelection();
         match_.reset();
         matchRecorded_ = false;
+        entry_.reset();
         break;
     case ' ':
         paused_ = !paused_;
@@ -184,28 +196,52 @@ bool App::handleKey_(int key)
     return true;
 }
 
-void App::recordMatch_()
+ScoreRecord App::currentRecord_() const
 {
-    LastMatch lm;
-    lm.valid = true;
+    ScoreRecord rec;
+    rec.when = ScoreStore::nowString();
     for (int p = 0; p < 2; ++p)
     {
-        lm.name[p] = duel_.side(p).name;
-        lm.score[p] = match_.score(p);
+        rec.name[p] = duel_.side(p).name;
+        rec.score[p] = match_.score(p);
     }
-    lm.winner = match_.winner();
-    menu_.setLastMatch(lm);
+    rec.winner = match_.winner();
+    return rec;
+}
+
+void App::onKnockout_()
+{
+    pending_ = currentRecord_(); // a hora do combate e a do K.O., nao a do registro
+    hasPending_ = true;
     matchRecorded_ = true;
+    entry_.start(scores_.nextId()); // sugestao: proximo registro livre (AAA, AAB...)
 }
 
-void App::recordIfPlayed_()
+void App::savePending_(const std::string &id)
 {
+    if (!hasPending_)
+        return;
+    pending_.id = id;
+    scores_.append(pending_); // grava no arquivo na hora
+    hasPending_ = false;
+    entry_.markSaved(ScoreStore::cleanId(id));
+    menu_.setScoreboard(scores_.recentBest(5));
+}
+
+void App::finishMatch_()
+{
+    if (hasPending_) // K.O. sem o Enter: usa o que foi digitado (completado com a sugestao)
+    {
+        savePending_(entry_.id());
+        return;
+    }
+    // interrompido depois da abertura: salva com o proximo registro livre
     if (inDuel_ && !matchRecorded_ && match_.time() > kIntroTime)
-        recordMatch_();
-}
-
-void App::saveScore_()
-{
-    if (menu_.lastMatch().valid)
-        scores_.save(menu_.lastMatch());
+    {
+        ScoreRecord rec = currentRecord_();
+        rec.id = scores_.nextId();
+        scores_.append(rec);
+        matchRecorded_ = true;
+        menu_.setScoreboard(scores_.recentBest(5));
+    }
 }

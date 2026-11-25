@@ -36,8 +36,8 @@ struct CharacterDef
 class MenuUI
 {
 public:
-    void setLastMatch(const LastMatch &lm) { lastMatch_ = lm; }
-    const LastMatch &lastMatch() const { return lastMatch_; }
+    // Tabela de recordes da tela inicial (ja filtrada e ordenada: ScoreStore::recentBest).
+    void setScoreboard(std::vector<ScoreRecord> rows) { board_ = std::move(rows); }
     MenuUI();
 
     bool loadCharacters(const std::string &assetsDir = "assets");
@@ -155,8 +155,8 @@ private:
     cv::Rect previewRect_[2];    // paineis laterais da selecao (P1 esquerda, P2 direita)
     cv::Rect selectHeader_;
     cv::Rect selectFooter_;
-    LastMatch lastMatch_;
-    void drawLastMatch_(cv::Mat &frame) const;
+    std::vector<ScoreRecord> board_;
+    void drawScoreboard_(cv::Mat &frame) const;
     int hoveredCard_(cv::Point pt) const;
     void drawCharacterPreview_(cv::Mat &frame, int p) const;
     cv::Point2f lastWandPos_[2]{{0.f, 0.f}, {0.f, 0.f}};

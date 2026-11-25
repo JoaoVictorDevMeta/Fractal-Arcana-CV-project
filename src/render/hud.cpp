@@ -568,13 +568,6 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
         if (koT > 1.6f)
             cv::putText(view, m.state() == MatchState::Player0Won ? "JOGADOR 1 VENCEU" : "JOGADOR 2 VENCEU",
                         {W / 2 - 200, H / 2 - 55}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {255, 255, 255}, 3);
-        if (koT > 2.5f && int(koT * 2.f) % 2 == 0)
-        {
-            const std::string hint = "Pressione M para voltar ao menu";
-            const cv::Size hs = pfx::textSize(hint, cv::FONT_HERSHEY_SIMPLEX, 0.55, 1);
-            pfx::outlinedText(view, hint, {W / 2 - hs.width / 2, H - 12}, cv::FONT_HERSHEY_SIMPLEX, 0.55,
-                              cv::Scalar(240, 235, 250), 1);
-        }
     }
 }
 

@@ -116,7 +116,15 @@ Cada jogador começa com **100 de vida** e **100 de mana** (regeneração de 8 p
 | `D` | Ativar/desativar modo debug |
 | `R` | Reiniciar partida |
 | `Espaço` | Pausar |
-| `ESC` | Sair (salva o placar do último combate em `config/ultimo_combate.txt`, mostrado na tela inicial ao abrir o jogo de novo) |
+| `ESC` | Sair (salva o combate em andamento) |
+
+### Recordes
+
+Depois do K.O., o jogo pede um **registro de 3 letras maiúsculas** (como nos fliperamas): digite as letras e aperte `Enter`. O campo já vem com uma sugestão (`AAA`, `AAB`, …), então basta `Enter`; `Backspace` apaga. Combates interrompidos (`M`, `R`, `ESC`) recebem o registro sugerido automaticamente.
+
+Todos os combates ficam em `config/placares.txt`. A tela inicial mostra a tabela **RECORDES** com os 5 últimos combates, do maior para o menor placar: registro, data e hora, jogadores, pontos e `K.O.` ao lado de quem perdeu.
+
+Pontuação: 10 por ponto de dano, +150 por especial que acerta, +50 por bloqueio, +100 por perfurar escudo e, no K.O., +1000 com bônus de tempo e **bônus de vida** do vencedor (25 por ponto de vida restante; +500 extra com a vida cheia).
 | `1`–`5` / `6`–`0` | Lança feitiços do Jogador 1 / Jogador 2 sem a varinha (testes) |
 
 ## Estrutura do projeto

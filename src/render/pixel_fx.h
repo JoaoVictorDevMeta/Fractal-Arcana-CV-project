@@ -97,7 +97,7 @@ namespace pfx
         cv::putText(img, s, org, font, scale, fg, thick, cv::LINE_AA);
     }
 
-    // Fonte de fliperama 3x5 em blocos: digitos, A-Z (minusculas viram maiusculas) e . , - ! : '
+    // Fonte de fliperama 3x5 em blocos: digitos, A-Z (minusculas viram maiusculas) e . , - ! : ' /
     // Cada glifo e escrito linha a linha (5 linhas de 3 colunas).
     inline const char *pixelGlyph(char c)
     {
@@ -148,6 +148,7 @@ namespace pfx
         case '!': return ".X." ".X." ".X." "..." ".X.";
         case ':': return "..." ".X." "..." ".X." "...";
         case '\'': return ".X." ".X." "..." "..." "...";
+        case '/': return "..X" "..X" ".X." "X.." "X..";
         default: return "..." "..." "..." "..." "...";
         // clang-format on
         }

@@ -121,8 +121,13 @@ public:
     MatchState state() const { return state_; }
     float time() const { return time_; }
     // Pontuacao: 10 por ponto de dano, +50 por bloquear, +150 por especial que acerta,
-    // +100 por perfurar escudo e, no nocaute, +1000 com bonus de tempo e de vida cheia.
+    // +100 por perfurar escudo e, no nocaute, +1000 com bonus de tempo e o bonus de vida
+    // do vencedor (kLifeBonusPerHp por ponto de vida restante; +500 extra com a vida cheia).
+    static constexpr int kKoBonus = 1000;
+    static constexpr int kLifeBonusPerHp = 25;
+    static constexpr int kPerfectBonus = 500;
     int score(int p) const { return score_[p]; }
+    int lastLifeBonus() const { return lastLifeBonus_; } // bonus de vida do ultimo K.O.
     int winner() const { return state_ == MatchState::Player0Won ? 0 : (state_ == MatchState::Player1Won ? 1 : -1); }
     bool inIntro() const { return state_ == MatchState::Running && time_ < kIntroTime; }
 
@@ -136,5 +141,6 @@ private:
     std::vector<CombatText> texts_;
     MatchState state_ = MatchState::Running;
     int score_[2] = {0, 0};
+    int lastLifeBonus_ = 0;
     void koBonus_(int winner);
 };

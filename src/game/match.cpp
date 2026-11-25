@@ -176,10 +176,13 @@ void Match::update(double dtd)
 
 void Match::koBonus_(int w)
 {
-    int bonus = 1000;
-    bonus += std::max(0, int(90.f - time_)) * 20; // vitoria rapida
-    if (players[w].health >= kStartHealth)
-        bonus += 500; // vitoria perfeita
-    score_[w] += bonus;
-    say_(w, CombatTextKind::Heal, "+" + std::to_string(bonus) + " K.O.!");
+    // nocaute + vitoria rapida
+    const int koBonus = kKoBonus + std::max(0, int(90.f - time_)) * 20;
+    // bonus de vida: quanto mais vida o vencedor terminar, mais pontos (vida cheia = 3000)
+    const int life = std::clamp(int(players[w].health + 0.5f), 0, int(kStartHealth));
+    const int lifeBonus = life * kLifeBonusPerHp + (life >= int(kStartHealth) ? kPerfectBonus : 0);
+    score_[w] += koBonus + lifeBonus;
+    lastLifeBonus_ = lifeBonus;
+    say_(w, CombatTextKind::Heal, "+" + std::to_string(koBonus) + " K.O.!");
+    say_(w, CombatTextKind::Mana, "+" + std::to_string(lifeBonus) + (life >= int(kStartHealth) ? " PERFEITO!" : " VIDA"));
 }

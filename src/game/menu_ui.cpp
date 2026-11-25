@@ -1136,82 +1136,96 @@ void MenuUI::drawTitleScreen_(cv::Mat &frame) const
                         on ? titlePurple : cv::Scalar(150, 130, 150), 1);
     }
 
-    drawLastMatch_(frame);
+    drawScoreboard_(frame);
 }
 
-// Placar da ultima partida, entre o logo e os botoes (ou no canto, se nao couber).
-void MenuUI::drawLastMatch_(cv::Mat &frame) const
+// Tabela de recordes estilo fliperama antigo: os 5 ultimos combates, do maior placar para o
+// menor, com registro (ID), data/hora, jogadores, pontos e "K.O." ao lado de quem perdeu.
+void MenuUI::drawScoreboard_(cv::Mat &frame) const
 {
-    // Placar do ultimo combate como uma tabela de recordes de fliperama:
-    // fundo preto, borda neon, tudo na fonte de blocos e o vencedor piscando.
-    if (!lastMatch_.valid)
+    if (board_.empty())
         return;
     const int W = frame.cols, H = frame.rows;
-    const cv::Scalar neon(255, 120, 230), gold(60, 215, 255), cyan(255, 230, 120), white(240, 240, 250);
+    const cv::Scalar neon(255, 120, 230), gold(60, 215, 255), red(60, 60, 255), headCol(200, 170, 120);
     const cv::Scalar shadow(30, 10, 40);
+    const cv::Scalar rankCol[5] = {{60, 215, 255}, {240, 240, 250}, {255, 230, 120}, {220, 140, 255}, {120, 240, 140}};
     const bool blink = int(titleTime_ * 3.f) % 2 == 0;
 
-    // tamanho do "pixel" da fonte: pelo espaco livre entre o logo e os botoes
+    // colunas (em caracteres da fonte de blocos)
+    enum
+    {
+        cRank = 0, cId = 3, cDate = 7, cName1 = 20, cKo1 = 31, cScore1 = 36, cVs = 43,
+        cName2 = 45, cKo2 = 56, cScore2 = 61, cTotal = 67
+    };
+    const int rows = static_cast<int>(std::min<size_t>(board_.size(), 5));
+
+    // tamanho do "pixel" da fonte: o maior que cabe entre o logo e os botoes (e na largura)
     const int gapTop = titleFrameRect_.br().y + H * 2 / 100;
     const int gapBot = btnPlayRect_.y - H * 4 / 100;
-    int px = std::clamp((gapBot - gapTop) / 30, 2, std::max(2, H / 150));
-    const int lineH = 7 * px;                           // altura de uma linha (5 + espaco)
-    const int panelH = 4 * lineH + 4 * px;              // titulo + 2 jogadores + vencedor
-    const int cols = 28;                                // caracteres por linha
-    const int panelW = cols * 4 * px + 8 * px;
+    const int unitsH = 3 + 8 + 8 + rows * 6 + 3;   // margem, titulo, cabecalho, linhas, margem
+    const int unitsW = cTotal * 4 - 1 + 8;
+    int px = std::min((gapBot - gapTop) / unitsH, (W * 94 / 100) / unitsW);
+    px = std::clamp(px, 2, std::max(2, H / 150));
+    const int panelW = unitsW * px, panelH = unitsH * px;
     cv::Rect r((W - panelW) / 2, gapTop + std::max(0, (gapBot - gapTop - panelH) / 2), panelW, panelH);
-    if (gapBot - gapTop < panelH) // sem espaco no meio: canto superior esquerdo
-        r = cv::Rect(W / 60, H / 40, panelW, panelH);
+    if (gapBot - gapTop < panelH) // nao cabe no meio: encosta no topo
+        r.y = std::max(4, H / 40);
 
-    // painel: fundo preto translucido, borda neon dupla em blocos
     ui::fillTranslucent(frame, r, cv::Scalar(8, 4, 12), 0.88);
     cv::rectangle(frame, r, neon, px);
     cv::rectangle(frame, cv::Rect(r.x + 2 * px, r.y + 2 * px, r.width - 4 * px, r.height - 4 * px), neon * 0.45, 1);
 
-    auto text = [&](const std::string &s, int x, int y, const cv::Scalar &col, int scale = 1)
+    const int x0 = r.x + 4 * px;
+    auto at = [&](int col, int y, const std::string &s, const cv::Scalar &col4)
     {
-        const int p = px * scale;
-        pfx::pixelText(frame, s, {x + p / 2 + 1, y + p / 2 + 1}, p, shadow);
-        pfx::pixelText(frame, s, {x, y}, p, col);
+        const cv::Point p(x0 + col * 4 * px, y);
+        pfx::pixelText(frame, s, p + cv::Point(px / 2 + 1, px / 2 + 1), px, shadow);
+        pfx::pixelText(frame, s, p, px, col4);
     };
-    auto centered = [&](const std::string &s, int y, const cv::Scalar &col)
-    {
-        text(s, r.x + (r.width - pfx::pixelTextWidth(s, px)) / 2, y, col);
-    };
+    // texto alinhado a direita terminando na coluna 'endCol' (exclusiva)
+    auto atRight = [&](int endCol, int y, const std::string &s, const cv::Scalar &col4)
+    { at(endCol - static_cast<int>(s.size()), y, s, col4); };
 
     int y = r.y + 3 * px;
-    centered("- ULTIMO COMBATE -", y, gold);
-    y += lineH + px;
+    const std::string title = "RECORDES - ULTIMOS 5 COMBATES";
+    pfx::pixelText(frame, title, {r.x + (r.width - pfx::pixelTextWidth(title, px)) / 2 + px / 2 + 1, y + px / 2 + 1}, px,
+                   shadow);
+    pfx::pixelText(frame, title, {r.x + (r.width - pfx::pixelTextWidth(title, px)) / 2, y}, px, gold);
+    y += 8 * px;
 
-    for (int p = 0; p < 2; ++p)
-    {
-        // "1P NOME ........ 012340"
-        std::string name = lastMatch_.name[p];
-        if (name.size() > 13)
-            name = name.substr(0, 13);
-        const std::string score = cv::format("%06d", lastMatch_.score[p]);
-        const std::string tag = p == 0 ? "1P" : "2P";
-        const int x0 = r.x + 4 * px;
-        const int xr = r.br().x - 4 * px - pfx::pixelTextWidth(score, px);
-        text(tag, x0, y, ui::playerColor(p));
-        const int nx = x0 + pfx::pixelTextWidth(tag + " ", px) + px;
-        text(name, nx, y, white);
-        // pontinhos ate a pontuacao
-        for (int dx = nx + pfx::pixelTextWidth(name + " ", px); dx < xr - 2 * px; dx += 2 * px)
-            cv::rectangle(frame, cv::Rect(dx, y + 4 * px, px, px), white * 0.4, cv::FILLED);
-        const bool won = lastMatch_.winner == p;
-        text(score, xr, y, won ? (blink ? gold : white) : cyan);
-        y += lineH;
-    }
+    at(cId, y, "ID", headCol);
+    at(cDate, y, "DATA  HORA", headCol);
+    at(cName1, y, "JOGADOR 1", headCol);
+    atRight(cScore1 + 6, y, "PTS", headCol);
+    at(cName2, y, "JOGADOR 2", headCol);
+    atRight(cScore2 + 6, y, "PTS", headCol);
+    y += 8 * px;
 
-    y += px;
-    if (lastMatch_.winner >= 0)
+    for (int i = 0; i < rows; ++i)
     {
-        if (blink)
-            centered(lastMatch_.winner == 0 ? "VENCEDOR: 1P" : "VENCEDOR: 2P", y, gold);
+        const ScoreRecord &rec = board_[i];
+        const cv::Scalar c = rankCol[i];
+        // "AAAA-MM-DD HH:MM" -> "DD/MM HH:MM"
+        std::string when = rec.when;
+        if (when.size() >= 16)
+            when = when.substr(8, 2) + "/" + when.substr(5, 2) + " " + when.substr(11, 5);
+
+        at(cRank, y, std::to_string(i + 1) + ".", c);
+        at(cId, y, rec.id, c);
+        at(cDate, y, when, c);
+        for (int p = 0; p < 2; ++p)
+        {
+            std::string name = rec.name[p];
+            if (name.size() > 10)
+                name = name.substr(0, 10);
+            at(p == 0 ? cName1 : cName2, y, name, c);
+            if (rec.winner >= 0 && rec.winner != p && (i != 0 || blink)) // quem perdeu
+                at(p == 0 ? cKo1 : cKo2, y, "K.O.", red);
+            atRight((p == 0 ? cScore1 : cScore2) + 6, y, cv::format("%06d", rec.score[p]), c);
+        }
+        at(cVs, y, "X", c * 0.6);
+        y += 6 * px;
     }
-    else
-        centered("COMBATE INTERROMPIDO", y, white * 0.7);
 }
 
 // Halo branco atras de uma caixa (mesmo efeito dos botoes do menu): fraco em repouso,

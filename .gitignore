@@ -40,5 +40,5 @@ Thumbs.db
 # logs
 
 log*
-# Placar salvo pelo jogo (ESC)
-config/ultimo_combate.txt
+# Recordes salvos pelo jogo
+config/placares.txt
