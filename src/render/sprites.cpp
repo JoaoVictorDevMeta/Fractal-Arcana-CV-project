@@ -27,6 +27,42 @@ cv::Mat loadSprite(const std::string &path, int height)
     return img;
 }
 
+cv::Mat coverCrop(const cv::Mat &src, cv::Size size, float focusY)
+{
+    if (src.empty() || size.width <= 0 || size.height <= 0)
+        return {};
+    const double s = std::max(double(size.width) / src.cols, double(size.height) / src.rows);
+    const int cw = std::min(src.cols, std::max(1, cvRound(size.width / s)));
+    const int ch = std::min(src.rows, std::max(1, cvRound(size.height / s)));
+    const int x = (src.cols - cw) / 2;
+    const int y = std::clamp(cvRound(src.rows * focusY - ch * 0.5), 0, src.rows - ch);
+    cv::Mat out;
+    cv::resize(src(cv::Rect(x, y, cw, ch)), out, size, 0, 0, s < 1.0 ? cv::INTER_AREA : cv::INTER_NEAREST);
+    return out;
+}
+
+cv::Mat cropToAlpha(const cv::Mat &src)
+{
+    if (src.empty() || src.type() != CV_8UC4)
+        return src;
+    int minX = src.cols, minY = src.rows, maxX = -1, maxY = -1;
+    for (int y = 0; y < src.rows; ++y)
+    {
+        const cv::Vec4b *row = src.ptr<cv::Vec4b>(y);
+        for (int x = 0; x < src.cols; ++x)
+            if (row[x][3] > 8)
+            {
+                minX = std::min(minX, x);
+                maxX = std::max(maxX, x);
+                minY = std::min(minY, y);
+                maxY = std::max(maxY, y);
+            }
+    }
+    if (maxX < minX || maxY < minY)
+        return src;
+    return src(cv::Rect(minX, minY, maxX - minX + 1, maxY - minY + 1)).clone();
+}
+
 void drawSprite(cv::Mat &dst, const cv::Mat &spr, cv::Point center)
 {
     if (spr.empty())
@@ -467,6 +503,8 @@ bool Assets::load(const std::string &dir,
         loadSlot(SpellType::AtaqueMedio, "pierce_" + id + ".png", 32, 100, 220, cv::Mat(), defMedio, defMedioF);
         loadSlot(SpellType::AtaqueForte, "ray_" + id + ".png", 0, 150, 200, defForte, none, none);
         loadSlot(SpellType::AtaqueEspecial, "especial_" + id + ".png", 32, 180, 220, cv::Mat(), defEspecial, defEspecialF);
+        // sem arte propria, o especial e desenhado em pixel art pelo codigo (render/special_fx)
+        customSpecial[p] = !cv::imread(spells + "especial_" + id + ".png", cv::IMREAD_UNCHANGED).empty();
     }
 
     for (int p = 0; p < 2; ++p)

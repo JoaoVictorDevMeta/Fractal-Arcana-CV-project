@@ -1,5 +1,11 @@
 #include "game/menu_ui.h"
+#include "game/specials.h"
+#include "game/spells.h"
+#include "render/pixel_fx.h"
+#include "render/special_fx.h"
 #include "render/sprites.h"
+#include "render/ui_widgets.h"
+#include <array>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
@@ -95,13 +101,21 @@ MenuUI::MenuUI()
     // selectImage: imagem exibida no menu (xxx_select.{png,jpeg})
     // playerImage: spritesheet usado no jogo (xxx_player.png)
     chars_ = {
-        {"derzu", "Derzu Omaia", "derzu_select", "derzu_player.png"},
-        {"menegueti", "Meneghetti, o Macom", "menegueti_select", "menegueti_player.png"},
-        {"venegas", "Venegas", "venegas_select", "venegas_player.png"},
-        {"neri", "Neri", "neri-select", "neri_player.png"},
-        {"baltar", "Baltar MST", "baltar_select", "baltar_player.png"},
-        {"subramana", "SubraMana", "anand_select", "anand_player.png"},
+        {"derzu", "Derzu Omaia", "derzu_select", "derzu_player.png", "O Programador Arcano"},
+        {"menegueti", "Meneghetti, o Macom", "menegueti_select", "menegueti_player.png", "Mestre da Loja Dourada"},
+        {"venegas", "Venegas", "venegas_select", "venegas_player.png", "O General das Runas"},
+        {"neri", "Neri", "neri-select", "neri_player.png", "Tecnomago do Vortice"},
+        {"baltar", "Baltar MST", "baltar_select", "baltar_player.png", "Guardiao da Floresta"},
+        {"subramana", "SubraMana", "anand_select", "anand_player.png", "O Ciborgue da Mana"},
     };
+}
+
+const cv::Mat &MenuUI::characterPortrait(int idx) const
+{
+    static const cv::Mat empty;
+    if (idx < 0 || idx >= static_cast<int>(chars_.size()))
+        return empty;
+    return chars_[idx].portrait;
 }
 
 bool MenuUI::loadCharacters(const std::string &assetsDir)
@@ -121,7 +135,23 @@ bool MenuUI::loadCharacters(const std::string &assetsDir)
         {
             chars_[i].portrait = img;
         }
+
+        // Sprite de corpo inteiro para o painel lateral da selecao
+        cv::Mat body = cv::imread(assetsDir + "/sprites/players/" + chars_[i].playerImage, cv::IMREAD_UNCHANGED);
+        if (!body.empty())
+        {
+            if (body.depth() == CV_16U)
+                body.convertTo(body, CV_8U, 1.0 / 257.0);
+            if (body.channels() == 3)
+                cv::cvtColor(body, body, cv::COLOR_BGR2BGRA);
+            else if (body.channels() == 1)
+                cv::cvtColor(body, body, cv::COLOR_GRAY2BGRA);
+            if (body.channels() == 4)
+                chars_[i].fullBody = cropToAlpha(body);
+        }
     }
+    lastSize_ = cv::Size(0, 0); // refaz os caches de desenho
+    bgCache_.release();
     return allOk;
 }
 
@@ -164,6 +194,7 @@ void MenuUI::setScreen(GameScreen s)
 void MenuUI::resetSelection()
 {
     chosen_[0] = chosen_[1] = -1;
+    hoverIdx_[0] = hoverIdx_[1] = -1;
     for (auto &c : chars_)
     {
         c.drawProgress[0] = c.drawProgress[1] = 0.f;
@@ -481,33 +512,53 @@ void MenuUI::buildCharacterLayout_(const cv::Size &size)
     const int w = size.width;
     const int h = size.height;
 
+    // Estilo jogo de luta: cabecalho, grade 3x2 de retratos no centro e um painel
+    // lateral por jogador mostrando o mago em destaque.
+    const int m = std::max(10, w / 90);
+    const int headerH = std::max(64, h * 14 / 100);
+    const int footerH = std::max(30, h * 6 / 100);
+    const int sideW = std::max(160, w * 22 / 100);
+    selectHeader_ = cv::Rect(0, 0, w, headerH);
+    selectFooter_ = cv::Rect(0, h - footerH, w, footerH);
+    const int bodyY = headerH + m / 2;
+    const int bodyH = std::max(100, h - headerH - footerH - m);
+    previewRect_[0] = cv::Rect(m, bodyY, sideW, bodyH);
+    previewRect_[1] = cv::Rect(w - m - sideW, bodyY, sideW, bodyH);
+
     const int cols = 3;
     const int rows = 2;
-    const int topMargin = std::max(72, h / 9);
-    const int bottomMargin = std::max(64, h / 10);
-    const int sideMargin = std::max(40, w / 16);
-    const int gapX = 24;
-    const int gapY = 20;
-
-    int availW = w - 2 * sideMargin - gapX * (cols - 1);
-    int availH = h - topMargin - bottomMargin - gapY * (rows - 1);
-    int cardW = std::max(120, availW / cols);
-    int cardH = std::max(110, availH / rows);
-
-    int totalW = cols * cardW + (cols - 1) * gapX;
-    int startX = (w - totalW) / 2;
+    const int gap = std::max(8, w / 100);
+    const int gridX = previewRect_[0].br().x + 2 * m;
+    const int gridW = std::max(cols * 60, previewRect_[1].x - 2 * m - gridX);
+    const int cardW = (gridW - gap * (cols - 1)) / cols;
+    const int cardH = (bodyH - gap * (rows - 1)) / rows;
 
     for (size_t i = 0; i < chars_.size(); ++i)
     {
         int r = static_cast<int>(i) / cols;
         int c = static_cast<int>(i) % cols;
-        cv::Rect rect(startX + c * (cardW + gapX),
-                      topMargin + r * (cardH + gapY),
-                      cardW, cardH);
+        cv::Rect rect(gridX + c * (cardW + gap), bodyY + r * (cardH + gap), cardW, cardH);
         chars_[i].cardRect = rect;
         if (chars_[i].drawLayer.empty() || chars_[i].drawLayer.size() != rect.size())
         {
             chars_[i].drawLayer = cv::Mat::zeros(rect.size(), CV_8UC3);
+        }
+
+        // retrato preenchendo o card sem distorcer (foco no rosto)
+        const int inset = 5;
+        chars_[i].cardImg = coverCrop(chars_[i].portrait,
+                                      cv::Size(std::max(1, cardW - 2 * inset), std::max(1, cardH - 2 * inset)), 0.32f);
+
+        // corpo inteiro para os paineis laterais (mantendo a proporcao)
+        chars_[i].preview[0].release();
+        chars_[i].preview[1].release();
+        const cv::Mat &fb = chars_[i].fullBody;
+        if (!fb.empty())
+        {
+            const double maxW = sideW - 24.0, maxH = bodyH * 0.50;
+            const double s = std::min(maxW / fb.cols, maxH / fb.rows);
+            chars_[i].preview[0] = resizeBGRA(fb, s);
+            cv::flip(chars_[i].preview[0], chars_[i].preview[1], 1);
         }
     }
 }
@@ -610,11 +661,13 @@ void MenuUI::processWandOnSelect_(int playerIdx, const Tracked &trk, double dt)
     if (!trk.valid)
     {
         hasLastWand_[playerIdx] = false;
+        hoverIdx_[playerIdx] = -1;
         return;
     }
 
     cv::Point2f cur = trk.pos;
     cv::Point pt(cvRound(cur.x), cvRound(cur.y));
+    hoverIdx_[playerIdx] = hoveredCard_(pt);
 
     if (chosen_[playerIdx] < 0)
     {
@@ -666,6 +719,8 @@ void MenuUI::update(const cv::Size &frameSize, const Tracked &p1, const Tracked 
 {
     ensureBackground_(frameSize);
     dt = std::clamp(dt, 0.0, 0.2);
+    if (screen_ != GameScreen::Title) // relogio das animacoes das outras telas
+        titleTime_ += float(dt);
 
     if (screen_ == GameScreen::Title)
     {
@@ -1082,34 +1137,6 @@ void MenuUI::drawTitleScreen_(cv::Mat &frame) const
     }
 }
 
-void MenuUI::drawInfoScreen_(cv::Mat &frame) const
-{
-    cv::Rect panel(frame.cols / 8, frame.rows / 7, (frame.cols * 3) / 4, (frame.rows * 5) / 8);
-    drawPixelPanel_(frame, panel, cv::Scalar(22, 18, 32), cv::Scalar(70, 200, 235), cv::Scalar(110, 80, 45), false);
-
-    putCenteredText(frame, "FRACTAL ARCANA - INFO", {panel.x, panel.y + 12, panel.width, 45},
-                    cv::FONT_HERSHEY_DUPLEX, 0.85, cv::Scalar(140, 245, 255), 2);
-
-    std::vector<std::string> lines{
-        "1. Aponte ou desenhe com a varinha sobre 'Jogar' (ou clique).",
-        "2. Dois jogadores (P1 e P2) escolhem seus magos desenhando sobre eles.",
-        "3. Personagens: Derzu Omaia, Meneghetti o Macom, Venegas,",
-        "   Neri, Baltar MST e SubraMana.",
-        "4. Use gestos e tracos para conjurar ataques e escudos."};
-
-    int y = panel.y + 75;
-    for (const auto &l : lines)
-    {
-        cv::putText(frame, l, {panel.x + 28, y}, cv::FONT_HERSHEY_SIMPLEX, 0.58,
-                    cv::Scalar(235, 235, 245), 1, cv::LINE_AA);
-        y += 34;
-    }
-
-    float bProg = std::max(backHover_[0], backHover_[1]);
-    drawPixelPanel_(frame, btnBackRect_, cv::Scalar(35, 25, 40), cv::Scalar(90, 190, 230), cv::Scalar(80, 70, 110), bProg > 0.05f);
-    putCenteredText(frame, "Voltar", btnBackRect_, cv::FONT_HERSHEY_DUPLEX, 0.85, cv::Scalar(240, 240, 250), 2);
-}
-
 // Halo branco atras de uma caixa (mesmo efeito dos botoes do menu): fraco em repouso,
 // forte e pulsando de leve no hover/selecao. A mascara borrada fica em cache por tamanho,
 // entao nao ha GaussianBlur por frame.
@@ -1143,115 +1170,448 @@ static void addRectGlow(cv::Mat &frame, const cv::Rect &r, float hv, float time)
     cv::add(roi, g3, roi);
 }
 
-void MenuUI::drawCharacterSelect_(cv::Mat &frame) const
+
+// ---------------------------------------------------------------------------
+// Tela "info": grimorio organizado em tres paineis (como jogar, feiticos, especiais)
+// ---------------------------------------------------------------------------
+
+namespace
 {
-    std::string header = "ESCOLHA SEU MAGO - P1: " + characterName(chosen_[0]) +
-                         " | P2: " + characterName(chosen_[1]);
-    // Paleta roxa suave (mesma dos botoes do menu inicial)
-    const cv::Scalar softPurple(230, 170, 200);  // texto
-    const cv::Scalar panelBorder(200, 120, 160); // borda externa
-    const cv::Scalar panelInner(110, 60, 90);    // borda interna
-    const cv::Scalar hotPurple(255, 210, 235);   // borda em hover/selecao
-
-    putCenteredText(frame, header, {0, 12, frame.cols, 44},
-                    cv::FONT_HERSHEY_DUPLEX, 0.72, softPurple, 2);
-
-    // intensidade de hover de cada card: varinha desenhando, mouse em cima ou escolhido
-    auto cardHover = [&](size_t i)
+    // Miniatura do retrato (quadrada, foco no rosto) em cache por personagem e tamanho.
+    const cv::Mat &thumbFor(int idx, const cv::Mat &portrait, int side)
     {
-        const auto &c = chars_[i];
-        float hv = std::max(c.drawProgress[0], c.drawProgress[1]);
-        if (chosen_[0] == static_cast<int>(i) || chosen_[1] == static_cast<int>(i) ||
-            c.cardRect.contains(mousePos_))
-            hv = 1.f;
-        return std::clamp(hv, 0.f, 1.f);
-    };
+        static std::map<std::array<int, 2>, cv::Mat> cache;
+        const std::array<int, 2> key = {idx, side};
+        auto it = cache.find(key);
+        if (it != cache.end())
+            return it->second;
+        if (cache.size() > 32)
+            cache.clear();
+        return cache.emplace(key, coverCrop(portrait, cv::Size(side, side), 0.28f)).first->second;
+    }
 
-    // halos primeiro (todos), para ficarem atras dos cards vizinhos
-    if (glowEnabled_)
-        for (size_t i = 0; i < chars_.size(); ++i)
-            addRectGlow(frame, chars_[i].cardRect, cardHover(i), titleTime_);
-
-    for (size_t i = 0; i < chars_.size(); ++i)
+    const char *spellBlurb(Shape s)
     {
-        const auto &c = chars_[i];
-        bool p1Sel = (chosen_[0] == static_cast<int>(i));
-        bool p2Sel = (chosen_[1] == static_cast<int>(i));
-
-        const float hv = cardHover(i);
-        const cv::Scalar borderCol = panelBorder * (1.f - hv) + hotPurple * hv;
-        drawPixelPanel_(frame, c.cardRect, cv::Scalar(20, 18, 30), borderCol, panelInner,
-                        false, softPurple);
-
-        // Retrato do personagem dentro do card
-        cv::Rect imgBox(c.cardRect.x + 10, c.cardRect.y + 10,
-                        std::max(1, c.cardRect.width - 20),
-                        std::max(1, c.cardRect.height - 44));
-        if (!c.portrait.empty() && imgBox.width > 10 && imgBox.height > 10)
+        switch (s)
         {
-            cv::Mat resized;
-            cv::resize(c.portrait, resized, imgBox.size(), 0, 0, cv::INTER_NEAREST);
-            resized.copyTo(frame(imgBox));
+        case Shape::Linha:
+            return "Rapido e barato";
+        case Shape::Raio:
+            return "Corta a arena num instante";
+        case Shape::Circulo:
+            return "Bloqueia 1 golpe por 4s";
+        case Shape::Triangulo:
+            return "Lento, mas pesado";
+        case Shape::Estrela:
+            return "Especial do mago (ao lado)";
+        default:
+            return "";
+        }
+    }
+} // namespace
+
+void MenuUI::drawInfoScreen_(cv::Mat &frame) const
+{
+    const int W = frame.cols, H = frame.rows;
+    const int F = cv::FONT_HERSHEY_SIMPLEX, FD = cv::FONT_HERSHEY_DUPLEX;
+    const cv::Scalar white(245, 240, 250), soft(200, 185, 205), gold(90, 210, 250);
+    const cv::Scalar lavender(230, 170, 200), cyan(255, 210, 120);
+    const double k = std::clamp(H / 720.0, 0.6, 1.6); // escala de fonte pela altura da tela
+
+    ui::fillTranslucent(frame, {0, 0, W, H}, cv::Scalar(8, 5, 12), 0.45);
+
+    // --- cabecalho ---
+    const std::string title = "GRIMORIO DO DUELO";
+    const double ts = ui::fitScale(title, FD, 1.25 * k, 2, W * 80 / 100);
+    const cv::Size tsz = pfx::textSize(title, FD, ts, 2);
+    const int titleY = std::max(tsz.height + 8, H * 8 / 100);
+    pfx::outlinedText(frame, title, {(W - tsz.width) / 2, titleY}, FD, ts, gold, 2);
+    putCenteredText(frame, "Tudo o que um mago precisa saber antes do duelo",
+                    {0, titleY + 6, W, int(28 * k)}, F, 0.5 * k, soft, 1);
+
+    // --- tres paineis ---
+    const int m = std::max(12, W / 70);
+    const int top = titleY + int(54 * k);
+    const int bottom = btnBackRect_.y - std::max(14, H / 45);
+    const int panelH = std::max(120, bottom - top);
+    const int avail = W - 4 * m;
+    const cv::Rect pA(m, top, avail * 29 / 100, panelH);
+    const cv::Rect pB(pA.br().x + m, top, avail * 33 / 100, panelH);
+    const cv::Rect pC(pB.br().x + m, top, W - m - (pB.br().x + m), panelH);
+
+    // A) Como jogar
+    ui::panel(frame, pA, lavender);
+    ui::panelTitle(frame, pA, "COMO JOGAR", lavender, 0.6 * k);
+    {
+        const char *steps[] = {
+            "Cada jogador fica numa metade da camera, com sua varinha.",
+            "Pare a varinha, desenhe a forma no ar e pare de novo.",
+            "Forma reconhecida + mana suficiente = feitico lancado!",
+            "O Escudo (circulo) segura o proximo golpe.",
+            "Zere a vida do oponente para vencer.",
+        };
+        const double fs = 0.46 * k;
+        const int badge = int(22 * k);
+        const int textX = pA.x + 18 + badge + 10;
+        const int maxW = pA.br().x - 14 - textX;
+        int y = pA.y + int(34 * k);
+        for (int i = 0; i < 5; ++i)
+        {
+            const cv::Rect b(pA.x + 18, y - badge + 6, badge, badge);
+            cv::rectangle(frame, b, lavender * 0.5, cv::FILLED);
+            cv::rectangle(frame, b, lavender, 1);
+            putCenteredText(frame, std::to_string(i + 1), b, FD, 0.5 * k, white, 1);
+            y = ui::putWrapped(frame, steps[i], {textX, y}, maxW, F, fs, white, 1, int(6 * k)) + int(8 * k);
         }
 
-        // Camada de desenho da varinha sobre o personagem
-        if (!c.drawLayer.empty() && c.drawLayer.size() == c.cardRect.size())
+        // teclas
+        y += int(6 * k);
+        cv::line(frame, {pA.x + 16, y - int(14 * k)}, {pA.br().x - 16, y - int(14 * k)}, lavender * 0.5, 1);
+        cv::putText(frame, "TECLAS", {pA.x + 18, y}, FD, 0.5 * k, lavender, 1, cv::LINE_AA);
+        y += int(24 * k);
+        const char *keys[][2] = {{"ESPACO", "pausa"}, {"R", "reinicia"}, {"M", "menu"}, {"D", "debug"}, {"ESC", "sai"}};
+        int x = pA.x + 18;
+        for (const auto &kv : keys)
+        {
+            const cv::Size ks = pfx::textSize(kv[0], F, 0.42 * k, 1);
+            const cv::Size ds = pfx::textSize(kv[1], F, 0.42 * k, 1);
+            const int itemW = ks.width + 12 + 6 + ds.width + 14;
+            if (x + itemW > pA.br().x - 14)
+            {
+                x = pA.x + 18;
+                y += int(26 * k);
+            }
+            if (y > pA.br().y - 8)
+                break;
+            const cv::Rect kb(x, y - ks.height - 6, ks.width + 12, ks.height + 12);
+            cv::rectangle(frame, kb, cv::Scalar(50, 38, 60), cv::FILLED);
+            cv::rectangle(frame, kb, lavender, 1);
+            cv::putText(frame, kv[0], {x + 6, y}, F, 0.42 * k, white, 1, cv::LINE_AA);
+            cv::putText(frame, kv[1], {kb.br().x + 6, y}, F, 0.42 * k, soft, 1, cv::LINE_AA);
+            x += itemW;
+        }
+    }
+
+    // B) Feiticos: forma -> magia, custo e efeito (valores lidos da tabela do jogo)
+    ui::panel(frame, pB, cyan);
+    ui::panelTitle(frame, pB, "FEITICOS", cyan, 0.6 * k);
+    {
+        const Shape order[5] = {Shape::Linha, Shape::Raio, Shape::Circulo, Shape::Triangulo, Shape::Estrela};
+        const int rowsTop = pB.y + int(22 * k);
+        const int rowH = (pB.br().y - 10 - rowsTop) / 5;
+        const int icon = std::min(rowH - 10, int(48 * k));
+        for (int i = 0; i < 5; ++i)
+        {
+            const SpellDef &sd = spellFor(order[i]);
+            const int y0 = rowsTop + i * rowH;
+            if (i > 0)
+                cv::line(frame, {pB.x + 14, y0}, {pB.br().x - 14, y0}, cyan * 0.3, 1);
+            const cv::Rect ib(pB.x + 16, y0 + (rowH - icon) / 2, icon, icon);
+            cv::rectangle(frame, ib, cv::Scalar(45, 30, 30), cv::FILLED);
+            cv::rectangle(frame, ib, cyan * 0.7, 1);
+            ui::drawShapeIcon(frame, order[i], ib, order[i] == Shape::Estrela ? gold : cyan, 2);
+
+            const int tx = ib.br().x + 12;
+            const int maxW = pB.br().x - 14 - tx;
+            const int nameY = y0 + rowH / 2 - int(4 * k);
+            cv::putText(frame, sd.name, {tx, nameY}, FD, ui::fitScale(sd.name, FD, 0.55 * k, 1, maxW), white, 1,
+                        cv::LINE_AA);
+            std::string stats = "Mana " + std::to_string(int(sd.manaCost));
+            if (sd.type == SpellType::Escudo)
+                stats += "  |  " + std::string(spellBlurb(order[i]));
+            else
+                stats += "  |  Dano " + std::to_string(int(sd.damage)) + "  |  " + spellBlurb(order[i]);
+            cv::putText(frame, stats, {tx, nameY + int(22 * k)}, F, ui::fitScale(stats, F, 0.42 * k, 1, maxW), soft, 1,
+                        cv::LINE_AA);
+        }
+    }
+
+    // C) Especiais de cada mago (Estrela)
+    ui::panel(frame, pC, gold);
+    ui::panelTitle(frame, pC, "ESPECIAIS (ESTRELA)", gold, 0.6 * k);
+    {
+        const int n = static_cast<int>(chars_.size());
+        const int rowsTop = pC.y + int(22 * k);
+        const int rowH = std::max(30, (pC.br().y - 10 - rowsTop) / std::max(1, n));
+        const int th = std::max(20, rowH - 10);
+        for (int i = 0; i < n; ++i)
+        {
+            const CharacterDef &c = chars_[i];
+            const SpecialKind sk = specialFor(c.id);
+            const SpecialDef &sd = specialDef(sk);
+            const cv::Scalar sc = specialColor(sk);
+            const int y0 = rowsTop + i * rowH;
+            if (i > 0)
+                cv::line(frame, {pC.x + 14, y0}, {pC.br().x - 14, y0}, gold * 0.3, 1);
+
+            const cv::Rect tb(pC.x + 16, y0 + (rowH - th) / 2, th, th);
+            const cv::Mat &thumb = thumbFor(i, c.portrait, th);
+            if (!thumb.empty() && thumb.size() == tb.size() && thumb.type() == frame.type() &&
+                (tb & cv::Rect(0, 0, W, H)) == tb)
+                thumb.copyTo(frame(tb));
+            cv::rectangle(frame, tb, sc, 2);
+
+            const int tx = tb.br().x + 12;
+            const int maxW = pC.br().x - 14 - tx;
+            const int line1 = y0 + rowH / 2 - int(6 * k);
+            const std::string head = c.name + "  -  " + sd.name;
+            cv::putText(frame, c.name, {tx, line1}, FD, ui::fitScale(head, FD, 0.5 * k, 1, maxW), white, 1, cv::LINE_AA);
+            const int nameW = pfx::textSize(c.name, FD, ui::fitScale(head, FD, 0.5 * k, 1, maxW), 1).width;
+            cv::putText(frame, std::string("  -  ") + sd.name, {tx + nameW, line1}, FD,
+                        ui::fitScale(head, FD, 0.5 * k, 1, maxW), sc, 1, cv::LINE_AA);
+            cv::putText(frame, sd.effect, {tx, line1 + int(20 * k)}, F, ui::fitScale(sd.effect, F, 0.42 * k, 1, maxW),
+                        soft, 1, cv::LINE_AA);
+        }
+    }
+
+    // --- botao voltar ---
+    const float bProg = std::clamp(std::max(backHover_[0], backHover_[1]), 0.f, 1.f);
+    if (glowEnabled_)
+        addRectGlow(frame, btnBackRect_, bProg, titleTime_);
+    ui::panel(frame, btnBackRect_, bProg > 0.05f ? cv::Scalar(255, 210, 235) : lavender, 0.9);
+    if (bProg > 0.01f)
+        cv::rectangle(frame, cv::Rect(btnBackRect_.x + 6, btnBackRect_.br().y - 9,
+                                      cvRound((btnBackRect_.width - 12) * bProg), 4),
+                      cv::Scalar(80, 255, 140), cv::FILLED);
+    putCenteredText(frame, "Voltar", btnBackRect_, FD, 0.85 * k, white, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Selecao de personagens: grade de retratos + painel de destaque por jogador
+// ---------------------------------------------------------------------------
+
+int MenuUI::hoveredCard_(cv::Point pt) const
+{
+    for (size_t i = 0; i < chars_.size(); ++i)
+        if (chars_[i].cardRect.contains(pt))
+            return static_cast<int>(i);
+    return -1;
+}
+
+void MenuUI::drawCharacterPreview_(cv::Mat &frame, int p) const
+{
+    const cv::Rect r = previewRect_[p];
+    if (r.width <= 0 || r.height <= 0)
+        return;
+    const int F = cv::FONT_HERSHEY_SIMPLEX, FD = cv::FONT_HERSHEY_DUPLEX;
+    const double k = std::clamp(frame.rows / 720.0, 0.6, 1.6);
+    const cv::Scalar pc = ui::playerColor(p);
+    const cv::Scalar white(245, 240, 250), soft(200, 185, 205);
+
+    ui::panel(frame, r, pc, 0.80);
+
+    // faixa "JOGADOR X"
+    const int tagH = std::max(26, int(32 * k));
+    const cv::Rect tag(r.x + 4, r.y + 4, r.width - 8, tagH);
+    ui::fillTranslucent(frame, tag, pc * 0.45, 0.95);
+    putCenteredText(frame, p == 0 ? "JOGADOR 1" : "JOGADOR 2", tag, FD, 0.6 * k, white, 1);
+
+    // quem mostrar: o escolhido, senao o que a varinha (ou o mouse) aponta
+    int idx = chosen_[p] >= 0 ? chosen_[p] : hoverIdx_[p];
+    if (idx < 0)
+    {
+        const int next = chosen_[0] < 0 ? 0 : (chosen_[1] < 0 ? 1 : -1);
+        if (next == p)
+            idx = hoveredCard_(mousePos_);
+    }
+
+    const int cx = r.x + r.width / 2;
+    const int imgTop = tag.br().y + int(10 * k);
+    const int base = imgTop + int(r.height * 0.50); // linha do "chao" do pedestal
+    const int pedW = r.width * 36 / 100, pedH = std::max(6, int(10 * k));
+
+    if (idx < 0)
+    {
+        cv::ellipse(frame, {cx, base}, {pedW, pedH}, 0, 0, 360, pc * 0.25, cv::FILLED, cv::LINE_AA);
+        cv::ellipse(frame, {cx, base}, {pedW, pedH}, 0, 0, 360, pc * 0.6, 1, cv::LINE_AA);
+        const bool blink = int(titleTime_ * 2.f) % 2 == 0;
+        putCenteredText(frame, "?", {r.x, imgTop, r.width, base - imgTop}, FD, 3.0 * k, blink ? pc : pc * 0.6, 4);
+        ui::putWrapped(frame, "Aponte a varinha para um mago e desenhe sobre o retrato",
+                       {r.x + 16, base + int(40 * k)}, r.width - 32, F, 0.45 * k, soft, 1, int(6 * k));
+        return;
+    }
+
+    const CharacterDef &c = chars_[idx];
+    const SpecialKind sk = specialFor(c.id);
+    const SpecialDef &sd = specialDef(sk);
+    const cv::Scalar sc = specialColor(sk);
+
+    // pedestal + mago (respiracao em 2 quadros, como na luta)
+    cv::ellipse(frame, {cx, base}, {pedW, pedH}, 0, 0, 360, sc * 0.3, cv::FILLED, cv::LINE_AA);
+    cv::ellipse(frame, {cx, base}, {pedW, pedH}, 0, 0, 360, sc, 2, cv::LINE_AA);
+    const cv::Mat &img = c.preview[p];
+    if (!img.empty())
+    {
+        const int bob = (int(titleTime_ * 3.f) % 2) ? int(2 * k) : 0;
+        drawSprite(frame, img, {cx, base - img.rows / 2 + pedH / 2 - bob});
+    }
+    else if (!c.cardImg.empty())
+    {
+        const cv::Rect pr(cx - (base - imgTop) * 3 / 8, imgTop, (base - imgTop) * 3 / 4, base - imgTop);
+        const cv::Mat face = coverCrop(c.portrait, pr.size(), 0.3f);
+        if (!face.empty() && (pr & cv::Rect(0, 0, frame.cols, frame.rows)) == pr)
+            face.copyTo(frame(pr));
+    }
+
+    // nome, epiteto e especial
+    int y = base + pedH + int(30 * k);
+    const int textW = r.width - 28;
+    const double ns = ui::fitScale(c.name, FD, 0.75 * k, 2, textW);
+    const cv::Size nsz = pfx::textSize(c.name, FD, ns, 2);
+    pfx::outlinedText(frame, c.name, {cx - nsz.width / 2, y}, FD, ns, white, 2);
+    y += int(24 * k);
+    putCenteredText(frame, c.title, {r.x, y - int(14 * k), r.width, int(18 * k)}, F, 0.45 * k, soft, 1);
+    y += int(18 * k);
+    cv::line(frame, {r.x + 18, y}, {r.br().x - 18, y}, pc * 0.5, 1);
+    y += int(26 * k);
+
+    ui::drawStar(frame, {r.x + 24, y - int(6 * k)}, std::max(6, int(9 * k)), sc, true);
+    const std::string sname = sd.name;
+    cv::putText(frame, sname, {r.x + 40, y}, FD, ui::fitScale(sname, FD, 0.55 * k, 1, r.width - 56), sc, 1,
+                cv::LINE_AA);
+    y += int(24 * k);
+    y = ui::putWrapped(frame, sd.effect, {r.x + 18, y}, textW, F, 0.44 * k, soft, 1, int(5 * k));
+
+    // estado da escolha
+    const cv::Rect st(r.x + 14, r.br().y - int(44 * k), r.width - 28, int(32 * k));
+    if (chosen_[p] == idx)
+    {
+        const bool blink = int(titleTime_ * 3.f) % 2 == 0;
+        ui::fillTranslucent(frame, st, pc * 0.5, 0.9);
+        cv::rectangle(frame, st, blink ? white : pc, 2);
+        putCenteredText(frame, "PRONTO!", st, FD, 0.65 * k, white, 2);
+    }
+    else
+    {
+        const float prog = std::clamp(c.drawProgress[p], 0.f, 1.f);
+        cv::rectangle(frame, st, pc * 0.6, 1);
+        if (prog > 0.f)
+            cv::rectangle(frame, cv::Rect(st.x + 2, st.y + 2, cvRound((st.width - 4) * prog), st.height - 4), pc * 0.7,
+                          cv::FILLED);
+        putCenteredText(frame, prog > 0.f ? "Desenhando..." : "Desenhe para escolher", st, F, 0.45 * k, white, 1);
+    }
+}
+
+void MenuUI::drawCharacterSelect_(cv::Mat &frame) const
+{
+    const int W = frame.cols, H = frame.rows;
+    const int F = cv::FONT_HERSHEY_SIMPLEX, FD = cv::FONT_HERSHEY_DUPLEX;
+    const double k = std::clamp(H / 720.0, 0.6, 1.6);
+    const cv::Scalar white(245, 240, 250), soft(200, 185, 205), gold(90, 210, 250);
+    const cv::Scalar lavender(230, 170, 200), hotPurple(255, 210, 235);
+
+    ui::fillTranslucent(frame, {0, 0, W, H}, cv::Scalar(8, 5, 12), 0.35);
+
+    // --- cabecalho ---
+    ui::fillTranslucent(frame, selectHeader_, cv::Scalar(22, 12, 30), 0.85);
+    cv::line(frame, {0, selectHeader_.br().y}, {W, selectHeader_.br().y}, gold * 0.8, 2);
+    {
+        const std::string title = "ESCOLHA SEU MAGO";
+        const double ts = ui::fitScale(title, FD, 1.2 * k, 2, W * 60 / 100);
+        const cv::Size tsz = pfx::textSize(title, FD, ts, 2);
+        const int ty = selectHeader_.y + selectHeader_.height * 55 / 100;
+        pfx::outlinedText(frame, title, {(W - tsz.width) / 2, ty}, FD, ts, gold, 2);
+        putCenteredText(frame, "Desenhe sobre um retrato com a varinha (ou clique) para escolher",
+                        {0, ty + 4, W, selectHeader_.br().y - ty - 4}, F, 0.45 * k, soft, 1);
+    }
+
+    // --- cards ---
+    const int mouseCard = hoveredCard_(mousePos_);
+    const int mouseFor = chosen_[0] < 0 ? 0 : (chosen_[1] < 0 ? 1 : -1);
+    const bool alt = int(titleTime_ * 4.f) % 2 == 0;
+
+    for (size_t ii = 0; ii < chars_.size(); ++ii)
+    {
+        const int i = static_cast<int>(ii);
+        const CharacterDef &c = chars_[ii];
+        const cv::Rect &r = c.cardRect;
+        bool on[2], sel[2];
+        for (int p = 0; p < 2; ++p)
+        {
+            sel[p] = chosen_[p] == i;
+            on[p] = sel[p] || (chosen_[p] < 0 && (hoverIdx_[p] == i || (mouseFor == p && mouseCard == i)));
+        }
+
+        float hv = std::max(c.drawProgress[0], c.drawProgress[1]);
+        if (on[0] || on[1])
+            hv = 1.f;
+        if (glowEnabled_)
+            addRectGlow(frame, r, std::clamp(hv, 0.f, 1.f), titleTime_);
+
+        cv::Scalar border = lavender * 0.8;
+        if (on[0] && on[1])
+            border = alt ? ui::playerColor(0) : ui::playerColor(1);
+        else if (on[0])
+            border = ui::playerColor(0);
+        else if (on[1])
+            border = ui::playerColor(1);
+        ui::panel(frame, r, border, 1.0, cv::Scalar(20, 14, 26), (sel[0] || sel[1]) ? 5 : 3);
+
+        // retrato
+        const int inset = 5;
+        const cv::Rect ir(r.x + inset, r.y + inset, r.width - 2 * inset, r.height - 2 * inset);
+        if (!c.cardImg.empty() && c.cardImg.size() == ir.size() && c.cardImg.type() == frame.type() &&
+            (ir & cv::Rect(0, 0, W, H)) == ir)
+        {
+            c.cardImg.copyTo(frame(ir));
+            if (!on[0] && !on[1] && (chosen_[0] >= 0 || chosen_[1] >= 0))
+                ui::fillTranslucent(frame, ir, cv::Scalar(0, 0, 0), 0.25); // destaca quem foi escolhido
+        }
+
+        // tracos da varinha sobre o retrato
+        if (!c.drawLayer.empty() && c.drawLayer.size() == r.size() && (r & cv::Rect(0, 0, W, H)) == r)
         {
             cv::Mat gray, mask;
             cv::cvtColor(c.drawLayer, gray, cv::COLOR_BGR2GRAY);
             cv::threshold(gray, mask, 1, 255, cv::THRESH_BINARY);
-            c.drawLayer.copyTo(frame(c.cardRect), mask);
+            c.drawLayer.copyTo(frame(r), mask);
         }
 
-        // Barra de progresso do desenho (P1 em cima, P2 embaixo da base do card)
-        if (c.drawProgress[0] > 0.f)
-        {
-            int w1 = cvRound((c.cardRect.width - 16) * c.drawProgress[0]);
-            cv::rectangle(frame, {c.cardRect.x + 8, c.cardRect.br().y - 34},
-                          {c.cardRect.x + 8 + w1, c.cardRect.br().y - 29}, cv::Scalar(255, 140, 20), cv::FILLED);
-        }
-        if (c.drawProgress[1] > 0.f)
-        {
-            int w2 = cvRound((c.cardRect.width - 16) * c.drawProgress[1]);
-            cv::rectangle(frame, {c.cardRect.x + 8, c.cardRect.br().y - 28},
-                          {c.cardRect.x + 8 + w2, c.cardRect.br().y - 23}, cv::Scalar(60, 255, 80), cv::FILLED);
-        }
+        // placa com nome e epiteto
+        const int plateH = std::max(int(40 * k), r.height * 22 / 100);
+        const cv::Rect plate(ir.x, ir.br().y - plateH, ir.width, plateH);
+        ui::fillTranslucent(frame, plate, cv::Scalar(12, 8, 18), 0.78);
+        const double ns = ui::fitScale(c.name, FD, 0.6 * k, 1, plate.width - 12);
+        putCenteredText(frame, c.name, {plate.x, plate.y + 2, plate.width, plate.height * 55 / 100}, FD, ns, white, 1);
+        putCenteredText(frame, c.title, {plate.x, plate.y + plate.height * 50 / 100, plate.width, plate.height * 45 / 100},
+                        F, ui::fitScale(c.title, F, 0.4 * k, 1, plate.width - 12), soft, 1);
 
-        // Nome do personagem
-        cv::Rect nameBox(c.cardRect.x + 6, c.cardRect.br().y - 24, c.cardRect.width - 12, 22);
-        putCenteredText(frame, c.name, nameBox, cv::FONT_HERSHEY_SIMPLEX, 0.52, softPurple, 1);
+        // progresso do desenho de cada jogador (P1 laranja, P2 verde)
+        for (int p = 0; p < 2; ++p)
+            if (c.drawProgress[p] > 0.f && !sel[p])
+                cv::rectangle(frame, cv::Rect(plate.x + 4, plate.y - 6 - p * 6,
+                                              cvRound((plate.width - 8) * std::min(1.f, c.drawProgress[p])), 4),
+                              ui::playerColor(p), cv::FILLED);
 
-        // Badges P1 / P2 se escolhido
-        if (p1Sel)
+        // etiquetas P1/P2 (cheia = escolhido, piscando = apontando)
+        for (int p = 0; p < 2; ++p)
         {
-            cv::rectangle(frame, {c.cardRect.x + 8, c.cardRect.y + 8}, {c.cardRect.x + 42, c.cardRect.y + 30},
-                          cv::Scalar(255, 130, 0), cv::FILLED);
-            cv::putText(frame, "P1", {c.cardRect.x + 13, c.cardRect.y + 24}, cv::FONT_HERSHEY_SIMPLEX, 0.55,
-                        cv::Scalar(255, 255, 255), 2);
-        }
-        if (p2Sel)
-        {
-            cv::rectangle(frame, {c.cardRect.br().x - 42, c.cardRect.y + 8}, {c.cardRect.br().x - 8, c.cardRect.y + 30},
-                          cv::Scalar(20, 200, 40), cv::FILLED);
-            cv::putText(frame, "P2", {c.cardRect.br().x - 37, c.cardRect.y + 24}, cv::FONT_HERSHEY_SIMPLEX, 0.55,
-                        cv::Scalar(255, 255, 255), 2);
+            if (!on[p] || (!sel[p] && !alt))
+                continue;
+            const std::string tagTxt = p == 0 ? "P1" : "P2";
+            const cv::Size tz = pfx::textSize(tagTxt, FD, 0.55 * k, 1);
+            const cv::Rect tagR(p == 0 ? ir.x + 4 : ir.br().x - tz.width - 16, ir.y + 4, tz.width + 12, tz.height + 12);
+            cv::rectangle(frame, tagR, sel[p] ? ui::playerColor(p) : ui::playerColor(p) * 0.5, cv::FILLED);
+            cv::rectangle(frame, tagR, white, 1);
+            putCenteredText(frame, tagTxt, tagR, FD, 0.55 * k, white, 1);
         }
     }
 
+    // --- paineis de destaque ---
+    drawCharacterPreview_(frame, 0);
+    drawCharacterPreview_(frame, 1);
+
+    // --- rodape ---
+    ui::fillTranslucent(frame, selectFooter_, cv::Scalar(22, 12, 30), 0.85);
+    cv::line(frame, {0, selectFooter_.y}, {W, selectFooter_.y}, gold * 0.5, 1);
+    putCenteredText(frame, "P1 = laranja    |    P2 = verde    |    R: refazer escolha    |    M: menu", selectFooter_,
+                    F, 0.45 * k, soft, 1);
+
     if (screen_ == GameScreen::DuelReady)
     {
-        cv::Rect banner(frame.cols / 5, frame.rows / 2 - 42, (frame.cols * 3) / 5, 84);
-        if (glowEnabled_)
-            addRectGlow(frame, banner, 1.f, titleTime_);
-        drawPixelPanel_(frame, banner, cv::Scalar(25, 20, 40), hotPurple, panelInner, false, softPurple);
-        std::string msg = "PRONTOS! " + characterName(chosen_[0]) + " vs " + characterName(chosen_[1]);
-        putCenteredText(frame, msg, banner, cv::FONT_HERSHEY_DUPLEX, 0.75, softPurple, 2);
-
-        const float bHv = std::clamp(std::max(backHover_[0], backHover_[1]), 0.f, 1.f);
-        if (glowEnabled_)
-            addRectGlow(frame, btnBackRect_, bHv, titleTime_);
-        drawPixelPanel_(frame, btnBackRect_, cv::Scalar(35, 25, 40),
-                        panelBorder * (1.f - bHv) + hotPurple * bHv, panelInner, false, softPurple);
-        putCenteredText(frame, "Menu", btnBackRect_, cv::FONT_HERSHEY_DUPLEX, 0.8, softPurple, 2);
+        const cv::Rect banner(W / 4, H / 2 - int(40 * k), W / 2, int(80 * k));
+        ui::panel(frame, banner, hotPurple, 0.92);
+        putCenteredText(frame, characterName(chosen_[0]) + "  VS  " + characterName(chosen_[1]), banner, FD, 0.8 * k,
+                        white, 2);
     }
 }

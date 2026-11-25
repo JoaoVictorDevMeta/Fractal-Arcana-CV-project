@@ -1,6 +1,8 @@
 #include "render/hud.h"
 #include "render/sprites.h"
 #include "render/fighter_anim.h"
+#include "render/pixel_fx.h"
+#include "render/special_fx.h"
 #include "game/match.h"
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
@@ -364,7 +366,18 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
 
     for (const Projectile &pr : m.projectiles())
     {
+        if (pr.t < 0.f) // especial ainda carregando: so aparece no disparo
+            continue;
         int x = xs[pr.owner] + int((xs[1 - pr.owner] - xs[pr.owner]) * pr.t);
+
+        // especial sem sprite proprio: desenhado em pixel art pelo codigo
+        if (pr.type == SpellType::AtaqueEspecial && !as.customSpecial[pr.owner])
+        {
+            if (glowEffects)
+                drawSpellGlow(view, {x, H / 2}, cvRound(H * 0.38f), specialColor(pr.special), m.time());
+            drawSpecialProjectile(view, pr.special, {x, H / 2}, pr.owner == 0 ? 1 : -1, m.time(), H);
+            continue;
+        }
 
         const auto &anim = pr.owner == 1 ? as.boltAnimFlipped[1][int(pr.type)]
                                          : as.boltAnim[0][int(pr.type)];
@@ -415,6 +428,62 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
 
     if (!sparkLayer.empty())
         cv::add(view, sparkLayer, view);
+
+    // textos de combate subindo sobre os magos ("-30", "BLOQUEADO!", "+15 VIDA"...)
+    {
+        int stack[2] = {0, 0}; // empilha textos simultaneos do mesmo mago
+        const double scale = std::clamp(H / 260.0, 0.45, 1.1);
+        for (auto it = m.combatTexts().rbegin(); it != m.combatTexts().rend(); ++it)
+        {
+            const CombatText &ct = *it;
+            if (ct.player < 0 || ct.player > 1)
+                continue;
+            if (ct.age > kCombatTextLife - 0.3f && int(ct.age * 20) % 2) // pisca antes de sumir
+                continue;
+            cv::Scalar col;
+            switch (ct.kind)
+            {
+            case CombatTextKind::Damage:
+                col = cv::Scalar(70, 90, 255);
+                break;
+            case CombatTextKind::Blocked:
+                col = cv::Scalar(255, 230, 150);
+                break;
+            case CombatTextKind::Heal:
+                col = cv::Scalar(110, 240, 120);
+                break;
+            case CombatTextKind::Mana:
+                col = cv::Scalar(255, 200, 90);
+                break;
+            case CombatTextKind::Drain:
+                col = cv::Scalar(230, 100, 230);
+                break;
+            default:
+                col = cv::Scalar(80, 230, 255);
+                break;
+            }
+            const cv::Size ts = pfx::textSize(ct.text, cv::FONT_HERSHEY_DUPLEX, scale, 2);
+            const float rise = pfx::stepT(ct.age, 15.f) * H * 0.35f;
+            int x = xs[ct.player] - ts.width / 2;
+            if (ct.kind == CombatTextKind::Damage && ct.age < 0.12f)
+                x += int(pfx::hash11(int(ct.age * 60), ct.player) * 4);
+            const int y = int(H * 0.30f - rise) - stack[ct.player]++ * (ts.height + 8);
+            pfx::outlinedText(view, ct.text, {x, std::max(ts.height + 2, y)}, cv::FONT_HERSHEY_DUPLEX, scale, col, 2);
+        }
+    }
+
+    // abertura: "PREPAREM-SE" e "LUTEM!"
+    if (m.inIntro())
+    {
+        const float t = m.time();
+        const bool fight = t >= kIntroTime - 0.7f;
+        const std::string txt = fight ? "LUTEM!" : "PREPAREM-SE";
+        const float u = pfx::seg(pfx::stepT(t - (fight ? kIntroTime - 0.7f : 0.f), 15.f), 0.f, 0.2f);
+        const double scale = std::clamp(H / 110.0, 0.8, 2.6) * (fight ? 1.4 - 0.4 * u : 1.0);
+        const cv::Size ts = pfx::textSize(txt, cv::FONT_HERSHEY_DUPLEX, scale, 3);
+        pfx::outlinedText(view, txt, {W / 2 - ts.width / 2, H / 2 + ts.height / 2}, cv::FONT_HERSHEY_DUPLEX, scale,
+                          fight ? cv::Scalar(60, 220, 255) : cv::Scalar(240, 235, 250), 3);
+    }
 
     if (m.state() != MatchState::Running)
     {
