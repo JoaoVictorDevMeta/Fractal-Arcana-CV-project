@@ -4,6 +4,20 @@
 
 constexpr float kCastGlowTime = 0.35f; // duracao (s) do brilho ao lancar feitico
 constexpr float kHitFlashTime = 0.30f; // duracao (s) do flash vermelho/tremor ao levar dano
+constexpr float kHitAnimTime = 0.50f;  // duracao (s) da animacao de dano (recuo)
+constexpr float kCastAnimTime = 0.70f; // duracao (s) do golpe especial ao lancar feitico
+constexpr float kKoAnimMax = 10.f;     // o relogio do nocaute para de contar depois disso
+
+// Estado de animacao de um mago, lido pelo render (tempos decorridos em s; < 0 = inativo).
+struct FighterAnim
+{
+    float hitT = -1.f;      // desde o ultimo golpe recebido
+    float hitPower = 0.f;   // 0..1, forca do golpe (define o recuo)
+    float castT = -1.f;     // desde o ultimo feitico lancado
+    SpellType castType = SpellType::Nenhum;
+    float koT = -1.f;       // desde o nocaute (este mago perdeu)
+    float victoryT = -1.f;  // desde o nocaute do oponente (este mago venceu)
+};
 
 struct Player
 {
@@ -15,6 +29,10 @@ struct Player
     float castGlow = 0.f;                   // tempo restante do brilho de lancamento
     SpellType castType = SpellType::Nenhum; // ultimo feitico lancado (define a cor)
     float hitFlash = 0.f;                   // tempo restante do efeito de dano
+    float hitAnim = -1.f;                   // tempo desde o golpe (-1 = sem animacao)
+    float hitPower = 0.f;                   // forca do ultimo golpe (0..1)
+    float castAnim = -1.f;                  // tempo desde o lancamento (-1 = sem animacao)
+    float koTime = -1.f;                    // tempo desde o nocaute (-1 = de pe)
 };
 
 struct Projectile
@@ -47,6 +65,18 @@ public:
     float castGlow01(int p) const { return players[p].castGlow / kCastGlowTime; }
     SpellType castType(int p) const { return players[p].castType; }
     float hitFlash01(int p) const { return players[p].hitFlash / kHitFlashTime; }
+    FighterAnim anim(int p) const
+    {
+        const Player &me = players[p];
+        FighterAnim a;
+        a.hitT = me.hitAnim;
+        a.hitPower = me.hitPower;
+        a.castT = me.castAnim;
+        a.castType = me.castType;
+        a.koT = me.koTime;
+        a.victoryT = players[1 - p].koTime;
+        return a;
+    }
     const std::vector<Projectile> &projectiles() const { return proj_; }
     MatchState state() const { return state_; }
     float time() const { return time_; }

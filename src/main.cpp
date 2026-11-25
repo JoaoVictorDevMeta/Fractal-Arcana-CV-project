@@ -306,6 +306,11 @@ int main(int argc, char **argv)
         // teclado simula o classificador (P1): 1=Linha 2=Raio 3=Circulo 4=Triangulo 5=Estrela
         if (k >= '1' && k <= '5')
             match.cast(0, static_cast<Shape>(k - '1'));
+        // idem para P2 (testar dano/nocaute sem varinha): 6=Linha 7=Raio 8=Circulo 9=Triangulo 0=Estrela
+        if (k >= '6' && k <= '9')
+            match.cast(1, static_cast<Shape>(k - '6'));
+        if (k == '0')
+            match.cast(1, Shape::Estrela);
     }
 
     cam.close();

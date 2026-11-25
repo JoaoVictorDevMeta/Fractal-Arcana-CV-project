@@ -345,6 +345,9 @@ bool Assets::load(const std::string &dir,
                   const std::string &p1Id,
                   const std::string &p2Id)
 {
+    charId[0] = p1Id;
+    charId[1] = p2Id;
+
     // --- Limpa estado antigo (ao trocar de personagem) ---
     wizard[0].clear();
     wizard[1].clear();
