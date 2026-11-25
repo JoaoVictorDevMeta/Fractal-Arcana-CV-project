@@ -508,7 +508,9 @@ bool Assets::load(const std::string &dir,
 
         // especial animado em quadros (tira horizontal). Quantidade de quadros por personagem:
         specialFrames[p].clear();
-        const int nFrames = (id == "baltar") ? 6 : 0;
+        // Baltar: gato -> tigre (6 quadros). Neri: silhueta, feixe, cruz nascendo, cruz, dissolucao (5).
+        const int nFrames = (id == "baltar") ? 6 : (id == "neri" ? 5 : 0);
+        const double frameH = (id == "neri") ? 384.0 : 180.0; // a cruz ocupa a arena inteira
         if (nFrames > 0)
         {
             cv::Mat strip = cv::imread(spells + "especial_" + id + "_frames.png", cv::IMREAD_UNCHANGED);
@@ -517,7 +519,7 @@ bool Assets::load(const std::string &dir,
             if (!strip.empty() && strip.channels() == 4 && strip.cols >= nFrames)
             {
                 const int cw = strip.cols / nFrames;
-                const double s = 180.0 / strip.rows; // altura final do quadro na arena
+                const double s = frameH / strip.rows; // altura do quadro (o render ainda ajusta a arena)
                 for (int i = 0; i < nFrames; ++i)
                 {
                     cv::Mat f;

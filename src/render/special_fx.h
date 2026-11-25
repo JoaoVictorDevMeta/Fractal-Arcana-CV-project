@@ -17,9 +17,18 @@ void drawSpecialProjectile(cv::Mat &view, SpecialKind k, cv::Point c, int dir, f
 void drawMaxwellTiger(cv::Mat &view, const std::vector<cv::Mat> &frames, int dir, float t,
                       int xFrom, int xTo, int H, float time);
 
-// Neri - "Jesus Cristo!": feixe de luz desce sobre o alvo, forma uma grande cruz azul e
-// se desfaz em pixels. t = progresso do especial (0..1).
+// Neri - "Jesus Cristo!" (versao desenhada pelo codigo, usada se faltar a arte):
+// feixe de luz desce sobre o alvo, forma uma grande cruz azul e se desfaz em pixels.
 void drawHolyCross(cv::Mat &view, int xTarget, float t, int H, float time);
+
+// Neri - "Jesus Cristo!" com os quadros da arte (especial_neri_frames.png):
+// o celular em chamas voa ate o alvo, o feixe sobe, a cruz se forma e se desfaz em pixels.
+// frames: 0 silhueta, 1 feixe, 2 cruz nascendo, 3 cruz completa, 4 dissolucao.
+void drawNeriCross(cv::Mat &view, const std::vector<cv::Mat> &frames, int dir, float t,
+                   int xFrom, int xTo, int H, float time);
+
+// Celular em chamas azuis (base do quadro da silhueta) aos pes da Neri durante a carga.
+void drawNeriPhone(cv::Mat &view, const std::vector<cv::Mat> &frames, cv::Point groundCenter, int H);
 
 // Venegas - "La integral es la soma de las partes!": curva que avanca do mago ate o alvo
 // com as barras da soma de Riemann surgindo uma a uma. front01 = quanto ja avancou.

@@ -1,4 +1,5 @@
 #pragma once
+#include "game/score_store.h"
 #include "vision/wand_detector.h"
 #include "vision/wand_kalman.h"
 #include <opencv2/core.hpp>
@@ -32,19 +33,11 @@ struct CharacterDef
     cv::Mat preview[2]; // corpo inteiro para o painel lateral de P1 (0) e P2 (1, espelhado)
 };
 
-// Resultado da ultima partida, mostrado na tela inicial.
-struct LastMatch
-{
-    bool valid = false;
-    std::string name[2];
-    int score[2] = {0, 0};
-    int winner = -1; // -1 = partida interrompida antes do nocaute
-};
-
 class MenuUI
 {
 public:
     void setLastMatch(const LastMatch &lm) { lastMatch_ = lm; }
+    const LastMatch &lastMatch() const { return lastMatch_; }
     MenuUI();
 
     bool loadCharacters(const std::string &assetsDir = "assets");

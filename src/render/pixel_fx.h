@@ -97,25 +97,59 @@ namespace pfx
         cv::putText(img, s, org, font, scale, fg, thick, cv::LINE_AA);
     }
 
-    // Fonte de fliperama 3x5 em blocos (digitos, 'P', 'X', ':' e espaco), para o placar.
+    // Fonte de fliperama 3x5 em blocos: digitos, A-Z (minusculas viram maiusculas) e . , - ! : '
+    // Cada glifo e escrito linha a linha (5 linhas de 3 colunas).
     inline const char *pixelGlyph(char c)
     {
+        if (c >= 'a' && c <= 'z')
+            c = char(c - 'a' + 'A');
         switch (c)
         {
-        case '0': return "XXXX.XX.XX.XXXX";
-        case '1': return ".X.XX..X..X.XXX";
-        case '2': return "XXX..XXXXX..XXX";
-        case '3': return "XXX..X.XX..XXXX";
-        case '4': return "X.XX.XXXX..X..X";
-        case '5': return "XXXX..XXX..XXXX";
-        case '6': return "XXXX..XXXX.XXXX";
-        case '7': return "XXX..X..X..X..X";
-        case '8': return "XXXX.XXXXX.XXXX";
-        case '9': return "XXXX.XXXX..XXXX";
-        case 'P': return "XXXX.XXXXX..X..";
-        case 'X': return "X.XX.X.X.X.XX.X";
-        case ':': return "....X.....X....";
-        default: return "...............";
+        // clang-format off
+        case '0': return "XXX" "X.X" "X.X" "X.X" "XXX";
+        case '1': return ".X." "XX." ".X." ".X." "XXX";
+        case '2': return "XXX" "..X" "XXX" "X.." "XXX";
+        case '3': return "XXX" "..X" ".XX" "..X" "XXX";
+        case '4': return "X.X" "X.X" "XXX" "..X" "..X";
+        case '5': return "XXX" "X.." "XXX" "..X" "XXX";
+        case '6': return "XXX" "X.." "XXX" "X.X" "XXX";
+        case '7': return "XXX" "..X" "..X" "..X" "..X";
+        case '8': return "XXX" "X.X" "XXX" "X.X" "XXX";
+        case '9': return "XXX" "X.X" "XXX" "..X" "XXX";
+        case 'A': return ".X." "X.X" "XXX" "X.X" "X.X";
+        case 'B': return "XX." "X.X" "XX." "X.X" "XX.";
+        case 'C': return ".XX" "X.." "X.." "X.." ".XX";
+        case 'D': return "XX." "X.X" "X.X" "X.X" "XX.";
+        case 'E': return "XXX" "X.." "XX." "X.." "XXX";
+        case 'F': return "XXX" "X.." "XX." "X.." "X..";
+        case 'G': return ".XX" "X.." "X.X" "X.X" ".XX";
+        case 'H': return "X.X" "X.X" "XXX" "X.X" "X.X";
+        case 'I': return "XXX" ".X." ".X." ".X." "XXX";
+        case 'J': return "..X" "..X" "..X" "X.X" ".X.";
+        case 'K': return "X.X" "X.X" "XX." "X.X" "X.X";
+        case 'L': return "X.." "X.." "X.." "X.." "XXX";
+        case 'M': return "X.X" "XXX" "XXX" "X.X" "X.X";
+        case 'N': return "XX." "X.X" "X.X" "X.X" "X.X";
+        case 'O': return ".X." "X.X" "X.X" "X.X" ".X.";
+        case 'P': return "XXX" "X.X" "XXX" "X.." "X..";
+        case 'Q': return ".X." "X.X" "X.X" "XX." ".XX";
+        case 'R': return "XX." "X.X" "XX." "X.X" "X.X";
+        case 'S': return ".XX" "X.." ".X." "..X" "XX.";
+        case 'T': return "XXX" ".X." ".X." ".X." ".X.";
+        case 'U': return "X.X" "X.X" "X.X" "X.X" "XXX";
+        case 'V': return "X.X" "X.X" "X.X" "X.X" ".X.";
+        case 'W': return "X.X" "X.X" "XXX" "XXX" "X.X";
+        case 'X': return "X.X" "X.X" ".X." "X.X" "X.X";
+        case 'Y': return "X.X" "X.X" ".X." ".X." ".X.";
+        case 'Z': return "XXX" "..X" ".X." "X.." "XXX";
+        case '.': return "..." "..." "..." "..." ".X.";
+        case ',': return "..." "..." "..." ".X." "X..";
+        case '-': return "..." "..." "XXX" "..." "...";
+        case '!': return ".X." ".X." ".X." "..." ".X.";
+        case ':': return "..." ".X." "..." ".X." "...";
+        case '\'': return ".X." ".X." "..." "..." "...";
+        default: return "..." "..." "..." "..." "...";
+        // clang-format on
         }
     }
     inline int pixelTextWidth(const std::string &s, int px) { return int(s.size()) * 4 * px - px; }

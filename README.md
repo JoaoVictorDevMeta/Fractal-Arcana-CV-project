@@ -116,7 +116,8 @@ Cada jogador começa com **100 de vida** e **100 de mana** (regeneração de 8 p
 | `D` | Ativar/desativar modo debug |
 | `R` | Reiniciar partida |
 | `Espaço` | Pausar |
-| `ESC` | Sair |
+| `ESC` | Sair (salva o placar do último combate em `config/ultimo_combate.txt`, mostrado na tela inicial ao abrir o jogo de novo) |
+| `1`–`5` / `6`–`0` | Lança feitiços do Jogador 1 / Jogador 2 sem a varinha (testes) |
 
 ## Estrutura do projeto
 
@@ -127,12 +128,12 @@ duelo-magos/
 ├── assets/            # sprites PNG com alpha (feitiços, HUD)
 ├── config/            # config.yaml (cores HSV, limiares, balanceamento)
 ├── src/
-│   ├── main.cpp
-│   ├── core/          # game loop, configuração, timer
+│   ├── main.cpp       # só lê os argumentos e roda o App
+│   ├── core/          # App (loop principal, teclado, placar), timer, configuração
 │   ├── vision/        # captura, rastreamento da varinha, trajetória
 │   ├── gesture/       # pré-processamento, segmentação, classificador de formas
-│   ├── game/          # jogador, feitiços, projéteis, estado e regras
-│   └── render/        # renderização, sprites, HUD
+│   ├── game/          # Match (regras, pontuação), especiais, menu, tela do duelo, placar salvo
+│   └── render/        # arena, animações dos magos, efeitos dos especiais, HUD, widgets
 └── tests/             # testes unitários e dataset de gestos
 ```
 

@@ -3,7 +3,10 @@
 #include "render/sprites.h"
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
+#include <map>
 
 using namespace pfx;
 
@@ -327,6 +330,101 @@ void drawHolyCross(cv::Mat &view, int xTarget, float t, int H, float time)
                 if (visible(id, frame, u))
                     pix(view, cx + x + hash11(id, 1) * u * H * 0.5f, armY + y + hash11(id, 2) * u * H * 0.3f, px,
                         id % 3 ? cyan : gold);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Neri: Jesus Cristo! com a arte em quadros
+// ---------------------------------------------------------------------------
+namespace
+{
+    constexpr float kNeriCellH = 1.05f;    // altura do quadro em relacao a arena
+    constexpr float kNeriPhoneBase = 0.92f; // linha da base do celular dentro do quadro
+
+    // Quadro redimensionado para a arena (em cache: o resize nao acontece a cada frame).
+    const cv::Mat &neriFrame(const std::vector<cv::Mat> &frames, int i, int H)
+    {
+        static std::map<std::array<long long, 3>, cv::Mat> cache;
+        const cv::Mat &src = frames[i];
+        const std::array<long long, 3> key = {(long long)(std::uintptr_t)src.data, i, H};
+        auto it = cache.find(key);
+        if (it != cache.end())
+            return it->second;
+        if (cache.size() > 32)
+            cache.clear();
+        const double s = kNeriCellH * H / src.rows;
+        cv::Mat r;
+        cv::resize(src, r, {}, s, s, cv::INTER_NEAREST);
+        return cache.emplace(key, std::move(r)).first->second;
+    }
+
+    // Celular em chamas: faixa de baixo do quadro do feixe (o feixe ainda nao subiu).
+    cv::Mat neriPhoneCrop(const std::vector<cv::Mat> &frames, int H)
+    {
+        const cv::Mat &f = neriFrame(frames, 1, H);
+        const int y0 = int(f.rows * 0.76f), y1 = int(f.rows * 0.95f);
+        const int w = f.cols * 6 / 10;
+        return f(cv::Rect((f.cols - w) / 2, y0, w, std::max(1, y1 - y0)));
+    }
+
+    // Desenha o quadro com a base do celular apoiada no chao, centrado em x.
+    void drawNeriCell(cv::Mat &view, const cv::Mat &f, int x, int H)
+    {
+        const int top = int((H - 4) - kNeriPhoneBase * f.rows);
+        drawSprite(view, f, {x, top + f.rows / 2});
+    }
+} // namespace
+
+void drawNeriPhone(cv::Mat &view, const std::vector<cv::Mat> &frames, cv::Point groundCenter, int H)
+{
+    if (frames.size() < 5 || H <= 8)
+        return;
+    const cv::Mat phone = neriPhoneCrop(frames, H);
+    drawSprite(view, phone, {groundCenter.x, groundCenter.y - phone.rows / 2});
+}
+
+void drawNeriCross(cv::Mat &view, const std::vector<cv::Mat> &frames, int dir, float t,
+                   int xFrom, int xTo, int H, float time)
+{
+    if (frames.size() < 5 || H <= 8)
+        return;
+    const float tq = stepT(t * 1.3f, 15.f) / 1.3f; // trocas de quadro no ritmo de 15 qps
+    if (tq < 0.20f)
+    {
+        // o celular voa em arco da Neri ate o oponente
+        const float u = easeOut(tq / 0.20f);
+        const int x0 = xFrom + dir * int(std::abs(xTo - xFrom) * 0.10f);
+        const int x = x0 + int((xTo - x0) * u);
+        const cv::Mat phone = neriPhoneCrop(frames, H);
+        const int ground = H - 4 - int(H * 0.30f * 4.f * u * (1.f - u));
+        drawSprite(view, phone, {x, ground - phone.rows / 2});
+        for (int i = 1; i <= 4; ++i) // rastro de luz
+            pix(view, x - dir * i * (H / 30.f), ground - phone.rows / 2 + hash11(i, int(time * 15)) * 4.f,
+                std::max(2, H / 60), i % 2 ? cv::Scalar(255, 225, 130) : cv::Scalar(230, 110, 30));
+        return;
+    }
+    int idx = 4;
+    if (tq < 0.36f)
+        idx = 1; // feixe subindo do celular
+    else if (tq < 0.52f)
+        idx = 2; // a cruz nasce
+    else if (tq < 0.82f)
+        idx = 3; // cruz completa
+    drawNeriCell(view, neriFrame(frames, idx, H), xTo, H);
+
+    // clarao no auge da cruz (pisca em quadros alternados)
+    if (idx == 3 && int(time * 15.f) % 2 == 0)
+    {
+        const cv::Mat &f = neriFrame(frames, 3, H);
+        const int top = int((H - 4) - kNeriPhoneBase * f.rows);
+        const int cy = top + int(f.rows * 0.46f);
+        const int w = f.cols * 3 / 4, hh = std::max(4, H / 14);
+        const cv::Rect bar = cv::Rect(xTo - w / 2, cy - hh / 2, w, hh) & cv::Rect(0, 0, view.cols, view.rows);
+        if (!bar.empty())
+        {
+            cv::Mat roi = view(bar);
+            cv::add(roi, cv::Scalar(60, 60, 60), roi);
+        }
     }
 }
 

@@ -786,47 +786,17 @@ namespace
             }
             break;
 
-        case MoveStyle::Neri: // celular em chamas azuis lancando um feixe de luz para o ceu
-        {
-            const cv::Scalar deep(230, 110, 30), cyan(255, 225, 130), gold(60, 200, 250);
-            const cv::Point2f phone(c.body.x + c.f * 0.30f * c.h, c.body.y - 0.05f * c.h);
-            const float pw = 0.11f * c.h, ph = 0.19f * c.h;
-            if (L == Layer::Back && t > 0.12f && t < kSuperRecover + 0.1f) // feixe subindo do celular
-            {
-                const float u = easeOut(seg(t, 0.12f, 0.40f));
-                const float fade = seg(t, kSuperRecover - 0.1f, kSuperRecover + 0.1f);
-                const int bw = std::max(c.px, int(c.h * (0.04f + 0.03f * u)));
-                const int top = int(phone.y - (phone.y + c.h) * u);
-                for (int y = int(phone.y); y > top && y > -c.px; y -= c.px)
-                    for (int x = -bw; x <= bw; x += c.px)
-                        if (visible(y * 31 + x, frame, fade))
-                            pix(c.view, phone.x + x, float(y), c.px,
-                                std::abs(x) < bw / 3 ? cv::Scalar(255, 255, 255) : (std::abs(x) < bw * 2 / 3 ? cyan : deep));
-            }
+        case MoveStyle::Neri: // como no 1o quadro da arte: silhueta azul cercada de cruzinhas
             if (L == Layer::Front && t < kSuperRecover + 0.25f)
             {
-                // chamas azuis em volta do celular
-                for (int i = 0; i < 12; ++i)
+                const cv::Scalar navy(110, 50, 20), cyan(255, 225, 130), gold(60, 200, 250);
+                for (int i = 0; i < 10; ++i)
                 {
-                    const float a = i * 2.f * kPi / 12.f;
-                    const float r = pw * (0.9f + 0.4f * hash01(i, frame));
-                    pix(c.view, phone.x + std::cos(a) * r, phone.y + std::sin(a) * r * 1.2f - hash01(i, frame + 1) * c.px * 2,
-                        c.px, i % 2 ? cyan : deep, 2);
-                }
-                // o celular: corpo escuro e tela brilhante
-                cv::rectangle(c.view, cv::Rect(int(phone.x - pw / 2), int(phone.y - ph / 2), int(pw), int(ph)),
-                              cv::Scalar(40, 30, 30), cv::FILLED);
-                cv::rectangle(c.view,
-                              cv::Rect(int(phone.x - pw / 2) + c.px, int(phone.y - ph / 2) + c.px,
-                                       std::max(1, int(pw) - 2 * c.px), std::max(1, int(ph) - 3 * c.px)),
-                              (frame % 2) ? cv::Scalar(255, 240, 180) : cyan, cv::FILLED);
-                // cruzinhas douradas e azuis subindo
-                for (int i = 0; i < 8; ++i)
-                {
-                    const float ph2 = std::fmod(t * 1.5f + hash01(i, seed), 1.f);
-                    const float x = c.body.x + hash11(i, seed + 2) * 0.5f * c.h;
-                    const float y = c.feet.y - ph2 * c.h * 1.1f;
-                    const cv::Scalar col = i % 2 ? gold : cyan;
+                    const float ph2 = std::fmod(t * 1.2f + hash01(i, seed), 1.f);
+                    const float x = c.body.x + hash11(i, seed + 2) * 0.55f * c.h;
+                    const float y = c.feet.y - (0.15f + 0.85f * ph2) * c.h;
+                    const cv::Scalar col = t < kSuperRelease ? (i % 4 == 0 ? cyan : navy) : (i % 2 ? gold : cyan);
+                    // cruz latina de pixels: haste mais longa embaixo
                     pix(c.view, x, y - c.px, c.px, col);
                     pix(c.view, x - c.px, y, c.px, col);
                     pix(c.view, x, y, c.px, col);
@@ -836,7 +806,6 @@ namespace
                 }
             }
             break;
-        }
 
         case MoveStyle::Baltar: // trepadeiras crescendo do chao + folhas
             if (L == Layer::Back)
@@ -1102,6 +1071,8 @@ cv::Point drawFighter(cv::Mat &view, const cv::Mat &spr, int side, cv::Point fee
 
     if (p.white > 0.f)
         drawPosed(view, spr, p, f, feet, cv::Scalar(255, 255, 255), 0.85f * p.white, 1.f);
+    else if (mode == Mode::Super && style == MoveStyle::Neri && t < kSuperRelease && p.red <= 0.f)
+        drawPosed(view, spr, p, f, feet, cv::Scalar(150, 70, 25), 0.72f, 1.f); // silhueta azul da arte
     else
         drawPosed(view, spr, p, f, feet, cv::Scalar(40, 40, 255), 0.65f * p.red, 1.f);
 

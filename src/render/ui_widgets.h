@@ -36,4 +36,7 @@ namespace ui
 
     // Estrela de 5 pontas cheia (indicador do especial).
     void drawStar(cv::Mat &img, cv::Point c, int r, const cv::Scalar &col, bool filled = true);
+
+    // Aviso "PAUSADO" no centro da imagem.
+    void pausedOverlay(cv::Mat &img);
 } // namespace ui

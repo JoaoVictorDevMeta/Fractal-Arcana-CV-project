@@ -1142,71 +1142,76 @@ void MenuUI::drawTitleScreen_(cv::Mat &frame) const
 // Placar da ultima partida, entre o logo e os botoes (ou no canto, se nao couber).
 void MenuUI::drawLastMatch_(cv::Mat &frame) const
 {
+    // Placar do ultimo combate como uma tabela de recordes de fliperama:
+    // fundo preto, borda neon, tudo na fonte de blocos e o vencedor piscando.
     if (!lastMatch_.valid)
         return;
     const int W = frame.cols, H = frame.rows;
-    const int FD = cv::FONT_HERSHEY_DUPLEX;
-    const double k = std::clamp(H / 720.0, 0.6, 1.6);
-    const cv::Scalar white(245, 240, 250), gold(90, 210, 250), digits(120, 235, 255);
+    const cv::Scalar neon(255, 120, 230), gold(60, 215, 255), cyan(255, 230, 120), white(240, 240, 250);
+    const cv::Scalar shadow(30, 10, 40);
+    const bool blink = int(titleTime_ * 3.f) % 2 == 0;
 
-    const int gapTop = titleFrameRect_.br().y + H * 3 / 100;
+    // tamanho do "pixel" da fonte: pelo espaco livre entre o logo e os botoes
+    const int gapTop = titleFrameRect_.br().y + H * 2 / 100;
     const int gapBot = btnPlayRect_.y - H * 4 / 100;
-    int ph = std::min(gapBot - gapTop, int(120 * k));
-    cv::Rect r;
-    if (ph >= int(80 * k))
-        r = cv::Rect(W * 24 / 100, gapTop + (gapBot - gapTop - ph) / 2, W * 52 / 100, ph);
-    else
+    int px = std::clamp((gapBot - gapTop) / 30, 2, std::max(2, H / 150));
+    const int lineH = 7 * px;                           // altura de uma linha (5 + espaco)
+    const int panelH = 4 * lineH + 4 * px;              // titulo + 2 jogadores + vencedor
+    const int cols = 28;                                // caracteres por linha
+    const int panelW = cols * 4 * px + 8 * px;
+    cv::Rect r((W - panelW) / 2, gapTop + std::max(0, (gapBot - gapTop - panelH) / 2), panelW, panelH);
+    if (gapBot - gapTop < panelH) // sem espaco no meio: canto superior esquerdo
+        r = cv::Rect(W / 60, H / 40, panelW, panelH);
+
+    // painel: fundo preto translucido, borda neon dupla em blocos
+    ui::fillTranslucent(frame, r, cv::Scalar(8, 4, 12), 0.88);
+    cv::rectangle(frame, r, neon, px);
+    cv::rectangle(frame, cv::Rect(r.x + 2 * px, r.y + 2 * px, r.width - 4 * px, r.height - 4 * px), neon * 0.45, 1);
+
+    auto text = [&](const std::string &s, int x, int y, const cv::Scalar &col, int scale = 1)
     {
-        ph = int(110 * k);
-        r = cv::Rect(W / 60, H / 40 + int(14 * k), W * 34 / 100, ph);
-    }
+        const int p = px * scale;
+        pfx::pixelText(frame, s, {x + p / 2 + 1, y + p / 2 + 1}, p, shadow);
+        pfx::pixelText(frame, s, {x, y}, p, col);
+    };
+    auto centered = [&](const std::string &s, int y, const cv::Scalar &col)
+    {
+        text(s, r.x + (r.width - pfx::pixelTextWidth(s, px)) / 2, y, col);
+    };
 
-    ui::panel(frame, r, gold, 0.85);
-    ui::panelTitle(frame, r, "ULTIMA PARTIDA", gold, 0.55 * k);
+    int y = r.y + 3 * px;
+    centered("- ULTIMO COMBATE -", y, gold);
+    y += lineH + px;
 
-    const int half = r.width / 2;
-    const int px = std::max(3, ph / 18);
     for (int p = 0; p < 2; ++p)
     {
-        const cv::Rect hr(r.x + p * half, r.y, half, r.height);
-        const cv::Scalar pc = ui::playerColor(p);
-        const bool won = lastMatch_.winner == p;
-
-        // "1P Nome"
+        // "1P NOME ........ 012340"
+        std::string name = lastMatch_.name[p];
+        if (name.size() > 13)
+            name = name.substr(0, 13);
+        const std::string score = cv::format("%06d", lastMatch_.score[p]);
         const std::string tag = p == 0 ? "1P" : "2P";
-        const std::string &name = lastMatch_.name[p];
-        const double ns = ui::fitScale(name, FD, 0.6 * k, 1, hr.width - 4 * px * 2 - 30);
-        const cv::Size nz = pfx::textSize(name, FD, ns, 1);
-        const int rowW = pfx::pixelTextWidth(tag, px) + 8 + nz.width;
-        const int nameY = hr.y + ph * 40 / 100;
-        const int x0 = hr.x + (hr.width - rowW) / 2;
-        pfx::pixelText(frame, tag, {x0, nameY - 5 * px}, px, pc);
-        pfx::outlinedText(frame, name, {x0 + pfx::pixelTextWidth(tag, px) + 8, nameY}, FD, ns, white, 1);
-
-        // pontuacao em digitos de fliperama
-        const std::string sc = cv::format("%06d", lastMatch_.score[p]);
-        const int big = px * 3 / 2;
-        const int sw = pfx::pixelTextWidth(sc, big);
-        const cv::Point stl(hr.x + (hr.width - sw) / 2, nameY + int(10 * k));
-        pfx::pixelText(frame, sc, stl + cv::Point(big / 2, big / 2), big, cv::Scalar(20, 10, 25));
-        pfx::pixelText(frame, sc, stl, big, won ? gold : digits);
-
-        if (won)
-        {
-            const std::string w = "VENCEU!";
-            const cv::Size wz = pfx::textSize(w, FD, 0.5 * k, 1);
-            const int wy = stl.y + 5 * big + int(22 * k);
-            ui::drawStar(frame, {hr.x + (hr.width - wz.width) / 2 - int(14 * k), wy - wz.height / 2}, int(8 * k), gold);
-            pfx::outlinedText(frame, w, {hr.x + (hr.width - wz.width) / 2, wy}, FD, 0.5 * k, gold, 1);
-        }
+        const int x0 = r.x + 4 * px;
+        const int xr = r.br().x - 4 * px - pfx::pixelTextWidth(score, px);
+        text(tag, x0, y, ui::playerColor(p));
+        const int nx = x0 + pfx::pixelTextWidth(tag + " ", px) + px;
+        text(name, nx, y, white);
+        // pontinhos ate a pontuacao
+        for (int dx = nx + pfx::pixelTextWidth(name + " ", px); dx < xr - 2 * px; dx += 2 * px)
+            cv::rectangle(frame, cv::Rect(dx, y + 4 * px, px, px), white * 0.4, cv::FILLED);
+        const bool won = lastMatch_.winner == p;
+        text(score, xr, y, won ? (blink ? gold : white) : cyan);
+        y += lineH;
     }
-    // divisoria com "X" no meio
-    cv::line(frame, {r.x + half, r.y + 14}, {r.x + half, r.br().y - 10}, gold * 0.5, 1);
-    const int xw = pfx::pixelTextWidth("X", px);
-    pfx::pixelText(frame, "X", {r.x + half - xw / 2, r.y + ph / 2 - 2 * px}, px, gold);
-    if (lastMatch_.winner < 0)
-        putCenteredText(frame, "partida interrompida", {r.x, r.br().y - int(24 * k), r.width, int(20 * k)},
-                        cv::FONT_HERSHEY_SIMPLEX, 0.42 * k, cv::Scalar(200, 185, 205), 1);
+
+    y += px;
+    if (lastMatch_.winner >= 0)
+    {
+        if (blink)
+            centered(lastMatch_.winner == 0 ? "VENCEDOR: 1P" : "VENCEDOR: 2P", y, gold);
+    }
+    else
+        centered("COMBATE INTERROMPIDO", y, white * 0.7);
 }
 
 // Halo branco atras de uma caixa (mesmo efeito dos botoes do menu): fraco em repouso,

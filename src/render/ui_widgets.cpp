@@ -121,6 +121,21 @@ namespace ui
         cv::polylines(img, &pp, &n, 1, true, filled ? cv::Scalar(20, 12, 25) : col, filled ? 1 : 2, cv::LINE_AA);
     }
 
+    void pausedOverlay(cv::Mat &img)
+    {
+        if (img.empty())
+            return;
+        const char *txt = "PAUSADO";
+        const double scale = std::max(1.0, img.cols / 900.0);
+        int baseline = 0;
+        const cv::Size ts = cv::getTextSize(txt, cv::FONT_HERSHEY_DUPLEX, scale, 3, &baseline);
+        const cv::Point org((img.cols - ts.width) / 2, (img.rows + ts.height) / 2);
+        const cv::Rect box(org.x - 28, org.y - ts.height - 18, ts.width + 56, ts.height + 36);
+        cv::rectangle(img, box, cv::Scalar(12, 10, 20), cv::FILLED);
+        cv::rectangle(img, box, cv::Scalar(120, 230, 255), 2, cv::LINE_AA);
+        cv::putText(img, txt, org, cv::FONT_HERSHEY_DUPLEX, scale, cv::Scalar(140, 245, 255), 3, cv::LINE_AA);
+    }
+
     void drawShapeIcon(cv::Mat &img, Shape s, const cv::Rect &box, const cv::Scalar &col, int thick)
     {
         const int m = std::max(2, std::min(box.width, box.height) / 6);

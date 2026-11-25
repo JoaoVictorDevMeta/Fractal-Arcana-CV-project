@@ -359,6 +359,11 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
             const cv::Point feet(xs[p], H / 2 + spr.rows / 2); // mesma posicao de antes em repouso
             body = drawFighter(view, spr, p, feet, anim, moveStyleFor(as.charId[p]),
                                m.time(), glowEffects);
+
+            // Neri carregando o "Jesus Cristo!": o celular em chamas azuis aos pes dela
+            if (anim.castType == SpellType::AtaqueEspecial && anim.special == SpecialKind::SobrecargaSistema &&
+                anim.koT < 0.f && anim.castT >= 0.05f && anim.castT < 0.5f && as.specialFrames[p].size() >= 5)
+                drawNeriPhone(view, as.specialFrames[p], {xs[p] + (p == 0 ? 1 : -1) * int(H * 0.28f), feet.y}, H);
         }
         else
             cv::circle(view, body, 30,
@@ -391,10 +396,13 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
             }
             if (pr.special == SpecialKind::SobrecargaSistema)
             {
-                if (glowEffects && pr.t > 0.18f)
-                    drawSpellGlow(view, {xs[1 - o], int(H * 0.36f)}, cvRound(H * 0.6f), cv::Scalar(255, 200, 90),
+                if (glowEffects && pr.t > 0.2f)
+                    drawSpellGlow(view, {xs[1 - o], int(H * 0.45f)}, cvRound(H * 0.6f), cv::Scalar(255, 200, 90),
                                   m.time());
-                drawHolyCross(view, xs[1 - o], pr.t, H, m.time());
+                if (as.specialFrames[o].size() >= 5) // arte da cruz em quadros
+                    drawNeriCross(view, as.specialFrames[o], o == 0 ? 1 : -1, pr.t, xs[o], xs[1 - o], H, m.time());
+                else
+                    drawHolyCross(view, xs[1 - o], pr.t, H, m.time());
                 continue;
             }
             if (pr.special == SpecialKind::CargaDoGeneral)
