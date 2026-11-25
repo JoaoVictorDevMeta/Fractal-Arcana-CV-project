@@ -120,6 +120,10 @@ public:
     const std::vector<CombatText> &combatTexts() const { return texts_; }
     MatchState state() const { return state_; }
     float time() const { return time_; }
+    // Pontuacao: 10 por ponto de dano, +50 por bloquear, +150 por especial que acerta,
+    // +100 por perfurar escudo e, no nocaute, +1000 com bonus de tempo e de vida cheia.
+    int score(int p) const { return score_[p]; }
+    int winner() const { return state_ == MatchState::Player0Won ? 0 : (state_ == MatchState::Player1Won ? 1 : -1); }
     bool inIntro() const { return state_ == MatchState::Running && time_ < kIntroTime; }
 
 private:
@@ -131,4 +135,6 @@ private:
     std::vector<Projectile> proj_;
     std::vector<CombatText> texts_;
     MatchState state_ = MatchState::Running;
+    int score_[2] = {0, 0};
+    void koBonus_(int winner);
 };

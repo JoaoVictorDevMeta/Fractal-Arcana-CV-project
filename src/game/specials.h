@@ -11,9 +11,9 @@ enum class SpecialKind
     Padrao = 0,
     ChuvaDeCodigo,      // Derzu
     OlhoQueTudoVe,      // Menegueti
-    CargaDoGeneral,     // Venegas
-    SobrecargaSistema,  // Neri
-    FuriaDaFloresta,    // Baltar
+    CargaDoGeneral,     // Venegas: "La integral es la soma de las partes!"
+    SobrecargaSistema,  // Neri: "Jesus Cristo!"
+    FuriaDaFloresta,    // Baltar: "Furia de Maxwell"
     SingularidadeMana,  // Subramana
     Count
 };
@@ -43,9 +43,10 @@ inline const SpecialDef &specialDef(SpecialKind k)
         {"Explosao de Mana", "Projetil mais poderoso do jogo", 40.f, 1.5f, 0.5f, 1, 0.f, false, 0.f, 0.f, 0.f},
         {"Chuva de Codigo", "Bloco de codigo devastador", 40.f, 1.5f, 0.5f, 1, 0.f, false, 0.f, 0.f, 0.f},
         {"Olho que Tudo Ve", "Atravessa e destroi o escudo", 30.f, 1.4f, 0.5f, 1, 0.f, true, 0.f, 0.f, 0.f},
-        {"Carga do General", "Rajada de 3 golpes em sequencia", 14.f, 1.1f, 0.5f, 3, 0.18f, false, 0.f, 0.f, 0.f},
-        {"Sobrecarga do Sistema", "Hackeia: o alvo perde 35 de mana", 28.f, 1.2f, 0.5f, 1, 0.f, false, 35.f, 0.f, 0.f},
-        {"Furia da Floresta", "Fotossintese: recupera 15 de vida", 30.f, 1.6f, 0.5f, 1, 0.f, false, 0.f, 15.f, 0.f},
+        // nomes sem acento: as fontes Hershey do OpenCV nao desenham caracteres acentuados
+        {"La integral es la soma de las partes!", "5 partes de 9 de dano: a soma acerta 45", 9.f, 1.0f, 0.5f, 5, 0.12f, false, 0.f, 0.f, 0.f},
+        {"Jesus Cristo!", "Cruz de luz: o alvo perde 35 de mana", 28.f, 1.3f, 0.5f, 1, 0.f, false, 35.f, 0.f, 0.f},
+        {"Furia de Maxwell", "O tigre Maxwell ataca: recupera 15 de vida", 30.f, 1.8f, 0.5f, 1, 0.f, false, 0.f, 15.f, 0.f},
         {"Singularidade de Mana", "Absorve: devolve 35 de mana", 30.f, 1.5f, 0.5f, 1, 0.f, false, 0.f, 0.f, 35.f},
     };
     const int i = static_cast<int>(k);

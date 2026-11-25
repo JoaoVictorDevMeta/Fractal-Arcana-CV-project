@@ -7,6 +7,10 @@ class Match; // declaração antecipada: evita incluir o match.h inteiro
 // Desenha o cenario completo (fundo, jogadores, projeteis, barras) em 'view'.// hud.h
 struct Assets;
 
+struct Projectile;
+// Posicao x (em pixels da arena) de um projetil em voo, para efeitos que o acompanham.
+int arenaProjectileX(const Projectile &pr, int arenaWidth);
+
 // glowEffects = false desliga os brilhos aditivos (mais leve em PCs fracos).
 void drawGame(cv::Mat &view, const Match &match, const Assets &assets, bool glowEffects = true);
 

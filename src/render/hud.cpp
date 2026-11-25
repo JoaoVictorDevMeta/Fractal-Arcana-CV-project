@@ -3,6 +3,7 @@
 #include "render/fighter_anim.h"
 #include "render/pixel_fx.h"
 #include "render/special_fx.h"
+#include "render/ui_widgets.h"
 #include "game/match.h"
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
@@ -304,6 +305,15 @@ static void drawProjectileSparks(cv::Mat &layer, const Projectile &pr, int xFrom
     }
 }
 
+// Os magos ficam a 160 px das bordas da arena.
+static int wizardX(int p, int W) { return p == 0 ? 160 : W - 160; }
+
+int arenaProjectileX(const Projectile &pr, int W)
+{
+    const int a = wizardX(pr.owner, W), b = wizardX(1 - pr.owner, W);
+    return a + int((b - a) * std::clamp(pr.t, 0.f, 1.f));
+}
+
 void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
 {
     if (!as.background.empty())
@@ -321,7 +331,7 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
         view.setTo(cv::Scalar(30, 20, 20));
 
     const int W = view.cols, H = view.rows;
-    const int xs[2] = {160, W - 160};
+    const int xs[2] = {wizardX(0, W), wizardX(1, W)};
 
     // "super" (Ataque Especial): a arena escurece por um instante, como num jogo de luta
     const float dark = std::max(superDarken(m.anim(0)), superDarken(m.anim(1)));
@@ -369,6 +379,27 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
         if (pr.t < 0.f) // especial ainda carregando: so aparece no disparo
             continue;
         int x = xs[pr.owner] + int((xs[1 - pr.owner] - xs[pr.owner]) * pr.t);
+
+        // especiais com animacao propria
+        if (pr.type == SpellType::AtaqueEspecial)
+        {
+            const int o = pr.owner;
+            if (pr.special == SpecialKind::FuriaDaFloresta && !as.specialFrames[o].empty())
+            {
+                drawMaxwellTiger(view, as.specialFrames[o], o == 0 ? 1 : -1, pr.t, xs[o], xs[1 - o], H, m.time());
+                continue;
+            }
+            if (pr.special == SpecialKind::SobrecargaSistema)
+            {
+                if (glowEffects && pr.t > 0.18f)
+                    drawSpellGlow(view, {xs[1 - o], int(H * 0.36f)}, cvRound(H * 0.6f), cv::Scalar(255, 200, 90),
+                                  m.time());
+                drawHolyCross(view, xs[1 - o], pr.t, H, m.time());
+                continue;
+            }
+            if (pr.special == SpecialKind::CargaDoGeneral)
+                continue; // a onda da integral e desenhada inteira logo abaixo
+        }
 
         // especial sem sprite proprio: desenhado em pixel art pelo codigo
         if (pr.type == SpellType::AtaqueEspecial && !as.customSpecial[pr.owner])
@@ -428,6 +459,42 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
 
     if (!sparkLayer.empty())
         cv::add(view, sparkLayer, view);
+
+    // Venegas: a onda da integral avanca com a parte da frente; as barras sao as "partes"
+    for (int o = 0; o < 2; ++o)
+    {
+        float front = -1.f;
+        int parts = 0;
+        for (const Projectile &pr : m.projectiles())
+            if (pr.owner == o && pr.type == SpellType::AtaqueEspecial && pr.special == SpecialKind::CargaDoGeneral)
+            {
+                ++parts;
+                front = std::max(front, pr.t);
+            }
+        if (parts == 0 || front < 0.f)
+            continue;
+        if (parts < specialDef(SpecialKind::CargaDoGeneral).shots) // a primeira parte ja acertou
+            front = 1.f;
+        if (glowEffects)
+            drawSpellGlow(view, {xs[o] + (xs[1 - o] - xs[o]) / 2, H * 2 / 3}, cvRound(H * 0.5f),
+                          cv::Scalar(230, 120, 80), m.time());
+        drawIntegralWave(view, xs[o], xs[1 - o], front, H, m.time());
+    }
+
+    // placar estilo fliperama nos cantos de cima
+    {
+        const int px = std::max(2, H / 72);
+        for (int p = 0; p < 2; ++p)
+        {
+            const std::string s = cv::format("%dP %06d", p + 1, m.score(p));
+            const int w = pfx::pixelTextWidth(s, px);
+            const cv::Point tl(p == 0 ? 2 * px : W - 2 * px - w, 2 * px);
+            pfx::pixelText(view, s, tl + cv::Point(px / 2 + 1, px / 2 + 1), px, cv::Scalar(20, 10, 25));
+            pfx::pixelText(view, s.substr(0, 2), tl, px, ui::playerColor(p));
+            pfx::pixelText(view, s.substr(2), tl + cv::Point(pfx::pixelTextWidth(s.substr(0, 2), px), 0), px,
+                           cv::Scalar(120, 235, 255));
+        }
+    }
 
     // textos de combate subindo sobre os magos ("-30", "BLOQUEADO!", "+15 VIDA"...)
     {
@@ -493,6 +560,13 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
         if (koT > 1.6f)
             cv::putText(view, m.state() == MatchState::Player0Won ? "JOGADOR 1 VENCEU" : "JOGADOR 2 VENCEU",
                         {W / 2 - 200, H / 2 - 55}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {255, 255, 255}, 3);
+        if (koT > 2.5f && int(koT * 2.f) % 2 == 0)
+        {
+            const std::string hint = "Pressione M para voltar ao menu";
+            const cv::Size hs = pfx::textSize(hint, cv::FONT_HERSHEY_SIMPLEX, 0.55, 1);
+            pfx::outlinedText(view, hint, {W / 2 - hs.width / 2, H - 12}, cv::FONT_HERSHEY_SIMPLEX, 0.55,
+                              cv::Scalar(240, 235, 250), 1);
+        }
     }
 }
 
