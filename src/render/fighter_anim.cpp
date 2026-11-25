@@ -330,6 +330,118 @@ namespace
     }
 
     // ---------------------------------------------------------------------------
+    // Super (Ataque Especial): carga -> disparo -> recuperacao, em kSpecialAnimTime.
+    // A carga termina em kSuperRelease, junto com o launchDelay do especial.
+    // ---------------------------------------------------------------------------
+
+    constexpr float kSuperRelease = 0.50f;
+    constexpr float kSuperRecover = 0.80f;
+
+    //                 carga                      disparo
+    void superKeys(MoveStyle s, KF &charge, KF &release)
+    {
+        switch (s)
+        {
+        case MoveStyle::Derzu: // ergue o cajado flutuando e investe
+            charge = {-4, -14, 8, 0.98f, 1.05f};
+            release = {30, -4, -18, 1.03f, 0.97f};
+            break;
+        case MoveStyle::Menegueti: // sobe alto diante do Olho
+            charge = {-2, -26, 6, 0.98f, 1.04f};
+            release = {10, -16, -10, 1.02f, 1.02f};
+            break;
+        case MoveStyle::Venegas: // posicao de sentido, depois a carga
+            charge = {-6, 0, 4, 0.97f, 1.06f};
+            release = {8, 0, -6, 1.f, 1.f};
+            break;
+        case MoveStyle::Neri: // pulo girando, depois aponta
+            charge = {0, -12, 0, 1.f, 1.02f};
+            release = {20, 0, -14, 1.03f, 0.97f};
+            break;
+        case MoveStyle::Baltar: // agacha juntando forca da terra
+            charge = {-4, 0, 4, 1.07f, 0.88f};
+            release = {14, 0, -8, 1.12f, 0.84f};
+            break;
+        case MoveStyle::Subramana: // meditacao levitando
+            charge = {0, -22, 0, 1.f, 1.02f};
+            release = {8, -10, -8, 1.f, 1.08f};
+            break;
+        default:
+            charge = {-4, 0, 8, 1.03f, 0.93f};
+            release = {20, 0, -12, 0.98f, 1.05f};
+            break;
+        }
+    }
+
+    Pose superPose(MoveStyle s, float t, float U, float h)
+    {
+        KF charge, release;
+        superKeys(s, charge, release);
+        const KF rest{0, 0, 0, 1.f, 1.f};
+        KF k;
+        if (t < kSuperRelease)
+            k = lerpKF(rest, charge, easeOut(seg(t, 0.f, 0.25f)));
+        else if (t < kSuperRecover)
+            k = lerpKF(charge, release, easeOut(seg(t, kSuperRelease, kSuperRelease + 0.12f)));
+        else
+            k = lerpKF(release, rest, easeInOut(seg(t, kSuperRecover, kSpecialAnimTime)));
+
+        Pose p;
+        p.dx = k.dx * U;
+        p.dy = k.dy * U;
+        p.lean = k.lean;
+        p.sx = k.sx;
+        p.sy = k.sy;
+
+        switch (s)
+        {
+        case MoveStyle::Neri: // dois giros completos durante a carga
+        {
+            const float u = seg(t, 0.05f, 0.45f);
+            if (u > 0.f && u < 1.f)
+            {
+                float c = std::cos(4.f * kPi * u);
+                if (std::fabs(c) < 0.1f)
+                    c = c < 0.f ? -0.1f : 0.1f;
+                p.sx *= c;
+            }
+            break;
+        }
+        case MoveStyle::Menegueti:
+        case MoveStyle::Subramana: // flutua oscilando
+            if (t > 0.2f && t < kSuperRecover)
+                p.dy += std::sin(t * 14.f) * 2.5f * U;
+            break;
+        case MoveStyle::Venegas: // tres investidas, uma por disparo
+            for (int i = 0; i < 3; ++i)
+            {
+                const float a = kSuperRelease + 0.18f * i;
+                const float u = seg(t, a, a + 0.16f);
+                if (u > 0.f && u < 1.f)
+                {
+                    p.dx += 26.f * U * arc(u);
+                    p.lean -= 10.f * arc(u);
+                }
+            }
+            break;
+        case MoveStyle::Baltar: // salta no disparo e pisa
+        {
+            const float u = seg(t, kSuperRelease, kSuperRelease + 0.2f);
+            if (u > 0.f && u < 1.f)
+            {
+                p.dy -= 0.16f * h * arc(u);
+                p.sy = 1.04f;
+                p.sx = 0.97f;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+        return p;
+    }
+
+    // ---------------------------------------------------------------------------
     // Desenho do sprite com pose
     // ---------------------------------------------------------------------------
 
@@ -438,6 +550,7 @@ namespace
         Idle,
         Hit,
         Cast,
+        Super,
         Ko,
         Victory
     };
@@ -596,10 +709,179 @@ namespace
         }
     }
 
+    // Olho que tudo ve: triangulo dourado com o olho no meio (blocos de pixel).
+    void drawEyeGlyph(cv::Mat &v, cv::Point2f c, float s, int px, const cv::Scalar &gold, float fade, int seed)
+    {
+        const cv::Point2f top(c.x, c.y - s), bl(c.x - s, c.y + s * 0.75f), br(c.x + s, c.y + s * 0.75f);
+        pixLine(v, top, bl, px, gold, fade, seed);
+        pixLine(v, top, br, px, gold, fade, seed + 1);
+        pixLine(v, bl, br, px, gold, fade, seed + 2);
+        const cv::Scalar white(255, 255, 255), iris(60, 40, 20);
+        const float ew = s * 0.45f, eh = s * 0.18f, ey = c.y + s * 0.15f;
+        for (float x = -ew; x <= ew; x += px)
+        {
+            const float yy = eh * std::sqrt(std::max(0.f, 1.f - (x * x) / (ew * ew)));
+            for (float y = -yy; y <= yy; y += px)
+                pix(v, c.x + x, ey + y, px, std::hypot(x, y) < eh * 0.8f ? iris : white);
+        }
+        pix(v, c.x, ey - px, px, white); // brilho no olho
+    }
+
+    void superFx(const FxCtx &c, Layer L)
+    {
+        const float t = c.t;
+        const int seed = c.side * 131 + 17;
+        const int frame = int(t * kAnimFps);
+        const bool charging = t < kSuperRelease;
+        const float chargeU = seg(t, 0.f, kSuperRelease);
+        const float fadeOut = seg(t, kSuperRecover, kSpecialAnimTime);
+        const cv::Scalar white(255, 255, 255);
+
+        // Comum: energia convergindo para o corpo durante a carga
+        if (L == Layer::Front && charging)
+            for (int i = 0; i < 14; ++i)
+            {
+                const float a = i * 2.f * kPi / 14.f + hash11(i, seed) * 0.4f;
+                const float ph = std::fmod(t * 2.2f + hash01(i, seed + 1), 1.f);
+                const float r = (1.f - ph) * 0.65f * c.h;
+                pix(c.view, c.body.x + std::cos(a) * r, c.body.y + std::sin(a) * r * 0.8f, c.px,
+                    i % 3 ? c.accent : white, ph > 0.7f ? 2 : 1);
+            }
+
+        switch (c.style)
+        {
+        case MoveStyle::Derzu: // chuva de codigo: colunas de blocos caindo
+            if (L == Layer::Back && t < kSpecialAnimTime)
+            {
+                const cv::Scalar green(90, 230, 90), dark(40, 120, 40);
+                for (int col = 0; col < 9; ++col)
+                {
+                    const float x = c.body.x + (col - 4) * 0.12f * c.h;
+                    const float speed = 0.9f + 0.6f * hash01(col, seed);
+                    const float head = std::fmod(t * speed * 1.6f + hash01(col, seed + 2), 1.f);
+                    for (int k = 0; k < 6; ++k)
+                    {
+                        const float y = c.feet.y - c.h * 1.05f + (head - k * 0.05f) * c.h * 1.05f;
+                        if (y < c.feet.y - c.h * 1.05f || !visible(col * 7 + k, seed + frame, fadeOut))
+                            continue;
+                        pix(c.view, x, y, c.px, k == 0 ? white : (k < 3 ? green : dark));
+                    }
+                }
+                if (!charging)
+                    pixelRing(c.view, {c.pos.x, c.feet.y - float(c.px)}, (0.3f + 0.3f * seg(t, 0.5f, 0.8f)) * c.h,
+                              0.22f, c.accent, c.px, fadeOut, seed, t * 3.f);
+            }
+            break;
+
+        case MoveStyle::Menegueti: // o Olho surge acima da cabeca
+            if (L == Layer::Back)
+            {
+                const float g = easeOut(seg(t, 0.05f, 0.35f));
+                drawEyeGlyph(c.view, {c.body.x, c.body.y - 0.15f * c.h}, 0.42f * c.h * g, c.px,
+                             c.accent, fadeOut, seed);
+            }
+            break;
+
+        case MoveStyle::Venegas: // estandarte: faixas azul/vermelha subindo + linhas de velocidade
+            if (L == Layer::Back)
+            {
+                const cv::Scalar blue(200, 90, 40), red(50, 50, 220);
+                for (int i = 0; i < 8; ++i)
+                {
+                    const float x = c.body.x - c.f * (0.25f + 0.04f * i) * c.h;
+                    const float rise = std::fmod(t * 1.8f + hash01(i, seed), 1.f);
+                    const float y = c.feet.y - rise * c.h;
+                    if (visible(i, seed + frame, fadeOut))
+                        pixLine(c.view, {x, y}, {x, y - 0.12f * c.h}, c.px, i % 2 ? blue : red);
+                }
+                if (!charging && t < kSuperRecover + 0.2f)
+                    for (int i = 0; i < 6; ++i)
+                    {
+                        const float y = c.feet.y - c.h * (0.15f + 0.13f * i);
+                        const float x0 = c.body.x - c.f * 0.15f * c.h;
+                        pixLine(c.view, {x0, y}, {x0 - c.f * (0.3f + 0.3f * hash01(i, seed)) * c.h, y}, c.px,
+                                lighten(c.accent, 0.5), seg(t, kSuperRelease, kSuperRecover + 0.2f), seed + i);
+                    }
+            }
+            break;
+
+        case MoveStyle::Neri: // falha digital: retangulos coloridos piscando
+            if (L == Layer::Front && t < kSuperRecover)
+            {
+                const cv::Scalar cols[4] = {{255, 220, 60}, {200, 60, 230}, {60, 230, 255}, {80, 220, 90}};
+                for (int i = 0; i < 7; ++i)
+                {
+                    if (hash01(i, frame + seed) < 0.45f)
+                        continue;
+                    const float x = c.body.x + hash11(i, frame + seed + 3) * 0.45f * c.h;
+                    const float y = c.body.y + hash11(i, frame + seed + 5) * 0.5f * c.h;
+                    const int w = c.px * (2 + int(hash01(i, frame + seed + 7) * 6));
+                    cv::rectangle(c.view, cv::Rect(int(x), int(y), w, c.px * 2), cols[i % 4], cv::FILLED);
+                }
+            }
+            break;
+
+        case MoveStyle::Baltar: // trepadeiras crescendo do chao + folhas
+            if (L == Layer::Back)
+            {
+                const cv::Scalar green(70, 200, 70), leaf(90, 235, 120);
+                const float grow = easeOut(seg(t, 0.05f, 0.45f));
+                for (int v = 0; v < 6; ++v)
+                {
+                    const float x0 = c.pos.x + (v - 2.5f) * 0.16f * c.h;
+                    const float len = grow * (0.35f + 0.35f * hash01(v, seed)) * c.h;
+                    for (float d = 0.f; d < len; d += c.px)
+                    {
+                        if (!visible(v * 50 + int(d), seed, fadeOut))
+                            continue;
+                        const float x = x0 + std::sin(d * 0.08f + v) * 0.04f * c.h;
+                        pix(c.view, x, c.feet.y - d, c.px, green);
+                        if (int(d / c.px) % 6 == 3)
+                            pix(c.view, x + c.px, c.feet.y - d, c.px, leaf, 2);
+                    }
+                }
+            }
+            if (L == Layer::Front && t >= kSuperRelease + 0.2f) // pisao: terra voando
+            {
+                const float u = seg(t, kSuperRelease + 0.2f, kSpecialAnimTime);
+                dust(c.view, {c.pos.x, float(c.feet.y)}, u, 0.7f * c.h, c.px, seed);
+            }
+            break;
+
+        case MoveStyle::Subramana: // aneis encolhendo na carga, explodindo no disparo
+            if (L == Layer::Back)
+                for (int k = 0; k < 3; ++k)
+                {
+                    float r;
+                    if (charging)
+                        r = (0.7f - 0.55f * std::fmod(chargeU * 1.5f + k / 3.f, 1.f)) * c.h;
+                    else
+                        r = (0.15f + 0.8f * seg(t, kSuperRelease + 0.05f * k, kSuperRecover + 0.1f * k)) * c.h;
+                    pixelRing(c.view, c.body, r, 1.f, k % 2 ? lighten(c.accent, 0.4) : c.accent, c.px,
+                              charging ? 0.f : seg(t, kSuperRelease, kSpecialAnimTime), seed + k, t * (k + 1));
+                }
+            break;
+
+        default:
+            break;
+        }
+
+        // Comum: explosao na mao no disparo
+        if (L == Layer::Front)
+        {
+            const cv::Point2f hand(c.body.x + c.f * 0.32f * c.h, c.body.y - 0.12f * c.h);
+            burst(c.view, hand, seg(t, kSuperRelease, kSuperRelease + 0.25f), 0.45f * c.h,
+                  lighten(c.accent, 0.3), c.px, seed + 57);
+        }
+    }
+
     void drawFx(const FxCtx &c, Layer L)
     {
         switch (c.mode)
         {
+        case Mode::Super:
+            superFx(c, L);
+            break;
         case Mode::Hit:
         {
             const float k = 0.6f + 0.4f * c.st.hitPower;
@@ -683,9 +965,9 @@ cv::Scalar moveAccent(MoveStyle s)
 float superDarken(const FighterAnim &st)
 {
     if (st.koT >= 0.f || st.hitT >= 0.f || st.castType != SpellType::AtaqueEspecial ||
-        st.castT < 0.f || st.castT > 0.45f)
+        st.castT < 0.f || st.castT > kSuperRecover)
         return 0.f;
-    return 1.f - seg(stepT(st.castT), 0.25f, 0.45f);
+    return 1.f - seg(stepT(st.castT), kSuperRelease, kSuperRecover);
 }
 
 cv::Point drawFighter(cv::Mat &view, const cv::Mat &spr, int side, cv::Point feet,
@@ -713,6 +995,13 @@ cv::Point drawFighter(cv::Mat &view, const cv::Mat &spr, int side, cv::Point fee
         mode = Mode::Hit;
         t = stepT(st.hitT);
         p = hitPose(t, st.hitPower, U);
+    }
+    else if (st.castT >= 0.f && st.castType == SpellType::AtaqueEspecial && st.castT < kSpecialAnimTime)
+    {
+        mode = Mode::Super;
+        t = stepT(st.castT);
+        p = superPose(style, t, U, h);
+        p.red = 0.65f * st.hitFlash; // super armadura: apanha sem interromper
     }
     else if (st.castT >= 0.f && st.castT < castDuration(st.castType))
     {
@@ -762,15 +1051,45 @@ cv::Point drawFighter(cv::Mat &view, const cv::Mat &spr, int side, cv::Point fee
                    body, cv::Point2f(feet.x + f * p.dx, float(feet.y)), moveAccent(style)};
     drawFx(fx, Layer::Back);
 
-    // imagens residuais: investida do Venegas e qualquer Ataque Especial
-    if (afterimages && mode == Mode::Cast && st.castType != SpellType::Escudo &&
-        (style == MoveStyle::Venegas || st.castType == SpellType::AtaqueEspecial))
+    // imagens residuais: investida do Venegas
+    if (afterimages && mode == Mode::Cast && st.castType != SpellType::Escudo && style == MoveStyle::Venegas)
     {
         for (int k = 3; k >= 1; --k)
         {
             const float tk = stepT(std::max(0.f, st.castT - 0.05f * k));
             const Pose q = castPose(style, st.castType, tk, U);
             drawPosed(view, spr, q, f, feet, fx.accent, 0.75f, 0.50f - 0.12f * k);
+        }
+    }
+
+    if (mode == Mode::Super)
+    {
+        // aura: silhueta maior na cor do personagem, pulsando em 2 quadros (carga e disparo)
+        if (t < kSuperRecover)
+        {
+            Pose aura = p;
+            aura.sx *= 1.08f;
+            aura.sy *= 1.06f;
+            aura.red = aura.white = 0.f;
+            const float a = (int(t * kAnimFps) % 2) ? 0.55f : 0.30f;
+            drawPosed(view, spr, aura, f, feet, lighten(fx.accent, 0.2), 1.f, a);
+        }
+        // imagens residuais no disparo
+        if (afterimages && t >= kSuperRelease && t < kSpecialAnimTime)
+            for (int k = 3; k >= 1; --k)
+            {
+                const Pose q = superPose(style, stepT(std::max(0.f, st.castT - 0.05f * k)), U, h);
+                drawPosed(view, spr, q, f, feet, fx.accent, 0.75f, 0.50f - 0.12f * k);
+            }
+        // Neri: falha digital com canais de cor deslocados
+        if (style == MoveStyle::Neri && t < kSuperRecover && int(t * kAnimFps) % 3 != 2)
+        {
+            Pose g = p;
+            g.red = g.white = 0.f;
+            g.dx = p.dx + 4.f * U;
+            drawPosed(view, spr, g, f, feet, cv::Scalar(255, 230, 0), 0.9f, 0.45f);
+            g.dx = p.dx - 4.f * U;
+            drawPosed(view, spr, g, f, feet, cv::Scalar(230, 0, 230), 0.9f, 0.45f);
         }
     }
 

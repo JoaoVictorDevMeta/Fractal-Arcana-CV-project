@@ -20,10 +20,16 @@ struct CharacterDef
     std::string name;
     std::string selectImage;            // xxx_select.{png,jpeg}  retrato no menu
     std::string playerImage;            // xxx_player.png         spritesheet no jogo
+    std::string title;                  // epiteto mostrado na selecao
     cv::Mat portrait;                   // carregada do disco ou gerada como fallback
     cv::Rect cardRect;                  // area na tela de selecao
     float drawProgress[2] = {0.f, 0.f}; // progresso desenhado pela varinha de P1 e P2
     cv::Mat drawLayer;                  // tracos desenhados sobre o card
+
+    // caches de desenho (refeitos quando o tamanho da tela muda)
+    cv::Mat fullBody;   // sprite do jogo (BGRA) recortado no corpo
+    cv::Mat cardImg;    // retrato recortado para preencher o card
+    cv::Mat preview[2]; // corpo inteiro para o painel lateral de P1 (0) e P2 (1, espelhado)
 };
 
 class MenuUI
@@ -51,6 +57,7 @@ public:
     std::string characterImagePath(int idx) const;
     std::string characterPlayerImage(int idx) const;
     std::string characterId(int idx) const;
+    const cv::Mat &characterPortrait(int idx) const;
 
     bool glowEnabled() const { return glowEnabled_; }
     void setGlowEnabled(bool on) { glowEnabled_ = on; }
@@ -141,6 +148,12 @@ private:
 
     std::vector<CharacterDef> chars_;
     int chosen_[2] = {-1, -1};
+    int hoverIdx_[2] = {-1, -1}; // card sob a varinha de cada jogador
+    cv::Rect previewRect_[2];    // paineis laterais da selecao (P1 esquerda, P2 direita)
+    cv::Rect selectHeader_;
+    cv::Rect selectFooter_;
+    int hoveredCard_(cv::Point pt) const;
+    void drawCharacterPreview_(cv::Mat &frame, int p) const;
     cv::Point2f lastWandPos_[2]{{0.f, 0.f}, {0.f, 0.f}};
     bool hasLastWand_[2]{false, false};
 };

@@ -2,7 +2,9 @@
 #include "vision/wand_detector.h"
 #include "vision/air_pen.h"
 #include "gesture/shape_classif.h"
+#include "render/combat_ui.h"
 #include "render/hud.h"
+#include "render/special_fx.h"
 #include "render/sprites.h"
 #include "game/match.h"
 #include "game/spells.h"
@@ -103,7 +105,10 @@ int main(int argc, char **argv)
     ShapeClassifier classifier;
     ShapeResult lastResult[2];
     double sinceMs[2] = {500.0, 500.0};
-    constexpr double cooldownMs = 500.0;
+    std::string castStatus[2];             // resultado do ultimo gesto, mostrado na camera
+    bool castOk[2] = {false, false};       // true = feitico lancado
+    float statusAge[2] = {99.f, 99.f};     // segundos desde o ultimo gesto
+    CombatSide side[2];                    // nome/retrato/especial de cada jogador na luta
     Match match;
     Assets assets;
     bool assetsLoaded = false;
@@ -132,18 +137,36 @@ int main(int argc, char **argv)
             for (int p = 0; p < 2; ++p)
             {
                 sinceMs[p] += dt * 1000.0;
+                statusAge[p] += float(dt);
                 if (game.pen[p].hasFinishedStroke())
                 {
                     if (menu.screen() == GameScreen::DuelReady)
                     {
                         std::vector<cv::Point2f> stroke = game.pen[p].getStroke();
                         lastResult[p] = classifier.classify(stroke);
-                        if (lastResult[p].shape != Shape::Nenhum)
+                        const Shape s = lastResult[p].shape;
+                        if (s != Shape::Nenhum)
                         {
-                            if (match.cast(p, lastResult[p].shape))
+                            castOk[p] = match.cast(p, s);
+                            if (castOk[p])
+                            {
                                 sinceMs[p] = 0.0;
+                                castStatus[p] = s == Shape::Estrela ? std::string(specialDef(match.special(p)).name)
+                                                                    : spellFor(s).name;
+                            }
+                            else if (match.inIntro())
+                                castStatus[p] = "Aguarde o inicio!";
+                            else if (match.mana(p) < spellFor(s).manaCost)
+                                castStatus[p] = "Mana insuficiente";
                             else
-                                lastResult[p].resultText = "Feitico indisponivel";
+                                castStatus[p] = "Aguarde a recarga";
+                            statusAge[p] = 0.f;
+                        }
+                        else if (!lastResult[p].resultText.empty())
+                        {
+                            castOk[p] = false;
+                            castStatus[p] = "Forma nao reconhecida";
+                            statusAge[p] = 0.f;
                         }
                     }
                     game.pen[p].resetStroke();
@@ -167,6 +190,19 @@ int main(int argc, char **argv)
                 assets.load("assets", p1File, p2File,
                             menu.characterId(i1), menu.characterId(i2));
                 assetsLoaded = true;
+
+                // nova luta: especiais de cada personagem e dados da interface
+                const int idx[2] = {i1, i2};
+                for (int p = 0; p < 2; ++p)
+                {
+                    side[p].name = menu.characterName(idx[p]);
+                    side[p].portrait = menu.characterPortrait(idx[p]);
+                    side[p].special = specialFor(menu.characterId(idx[p]));
+                    match.setSpecial(p, side[p].special);
+                    castStatus[p].clear();
+                    statusAge[p] = 99.f;
+                }
+                match.reset();
             }
             if (!paused)
             {
@@ -202,44 +238,10 @@ int main(int argc, char **argv)
             const int cameraWidth = std::max(1, width / 2 - 2 * margin);
             const int cameraPanelHeight = std::max(1, cameraHeight - 2 * margin);
 
-            cv::Mat display(height, width, CV_8UC3, cv::Scalar(18, 16, 25));
+            cv::Mat display(height, width, CV_8UC3, cv::Scalar(22, 14, 30));
             cv::Mat hud = display(cv::Rect(0, 0, width, hudHeight));
             const int playerWidth = width / 2;
-            for (int p = 0; p < 2; ++p)
-            {
-                const int left = p * playerWidth;
-                const int textX = left + margin;
-                const int barWidth = std::max(1, playerWidth - 2 * margin);
-                const int titleY = std::max(18, hudHeight * 24 / 100);
-
-                cv::putText(hud, p == 0 ? "JOGADOR 1" : "JOGADOR 2",
-                            {textX, titleY}, cv::FONT_HERSHEY_SIMPLEX, 0.65,
-                            cv::Scalar(245, 230, 190), 2, cv::LINE_AA);
-
-                // Barras de vida e mana (com moldura), lado a lado abaixo do titulo.
-                // P1: vida | mana (da esquerda p/ direita). P2: mana | vida (vida na borda externa).
-                const int barGap = std::max(6, margin / 2);
-                const int barTop = titleY + 6;
-                const int barMaxH = std::max(1, hudHeight - barTop - 4);
-                const cv::Size barSize = statBarSize(assets, {std::max(1, (barWidth - barGap) / 2), barMaxH});
-                const int barY = barTop + (barMaxH - barSize.height) / 2;
-                const int rowW = 2 * barSize.width + barGap;
-                const int rowX = (p == 0) ? textX : left + playerWidth - margin - rowW;
-                const cv::Rect healthRect(p == 0 ? rowX : rowX + barSize.width + barGap, barY,
-                                          barSize.width, barSize.height);
-                const cv::Rect manaRect(p == 0 ? rowX + barSize.width + barGap : rowX, barY,
-                                        barSize.width, barSize.height);
-                drawStatBar(hud, assets, BarKind::Health, p, match.health01(p), healthRect,
-                            cv::format("%d/100", cvRound(match.health01(p) * 100.f)));
-                drawStatBar(hud, assets, BarKind::Mana, p, match.mana01(p), manaRect,
-                            cv::format("%d/100", cvRound(match.mana01(p) * 100.f)));
-                if (sinceMs[p] < cooldownMs)
-                    cv::putText(hud, "AGUARDE", {textX + barWidth - 90, titleY},
-                                cv::FONT_HERSHEY_SIMPLEX, 0.42,
-                                cv::Scalar(180, 180, 180), 1, cv::LINE_AA);
-            }
-            cv::line(display, {playerWidth, 0}, {playerWidth, height},
-                     cv::Scalar(120, 120, 130), 1, cv::LINE_AA);
+            drawCombatHud(hud, match, assets, side);
 
             cv::Mat cameraSource;
             if (debug)
@@ -259,26 +261,24 @@ int main(int argc, char **argv)
                     cameraSource, game.zone(p), cameraSize);
                 const int x = p * playerWidth + (playerWidth - cameraWidth) / 2;
                 const int y = cameraY + (cameraHeight - cameraPanelHeight) / 2;
-                cameraView.copyTo(display(cv::Rect(x, y, cameraWidth, cameraPanelHeight)));
-                cv::rectangle(display, {x, y, cameraWidth, cameraPanelHeight},
-                              cv::Scalar(210, 210, 220), 2, cv::LINE_AA);
-
-                const int statusY = std::min(height - arenaHeight - 4,
-                                             y + cameraPanelHeight + 20);
-                const ShapeResult &result = lastResult[p];
-                const std::string status = result.shape != Shape::Nenhum
-                                               ? "MAGIA: " + spellFor(result.shape).name
-                                               : (result.resultText.empty() ? "" : "Forma nao reconhecida");
-                if (!status.empty())
-                    cv::putText(display, status, {p * playerWidth + margin, statusY},
-                                cv::FONT_HERSHEY_SIMPLEX, 0.45,
-                                cv::Scalar(240, 230, 190), 1, cv::LINE_AA);
+                const cv::Rect camRect(x, y, cameraWidth, cameraPanelHeight);
+                cameraView.copyTo(display(camRect));
+                drawCameraFrame(display, camRect, p, side[p], match, castStatus[p], castOk[p], statusAge[p]);
             }
 
             cv::Mat arena = display(cv::Rect(0, height - arenaHeight, width, arenaHeight));
             drawGame(arena, match, assets, menu.glowEnabled());
-            cv::line(display, {0, cameraY}, {width, cameraY},
-                     cv::Scalar(100, 100, 110), 1, cv::LINE_AA);
+            cv::line(display, {0, height - arenaHeight}, {width, height - arenaHeight},
+                     cv::Scalar(90, 210, 250), 2, cv::LINE_AA);
+
+            // super: faixa com o retrato e o nome do especial atravessando a area das cameras
+            cv::Mat upper = display(cv::Rect(0, 0, width, height - arenaHeight));
+            for (int p = 0; p < 2; ++p)
+            {
+                const FighterAnim a = match.anim(p);
+                if (a.castType == SpellType::AtaqueEspecial && a.castT >= 0.f && a.koT < 0.f)
+                    drawSuperCutIn(upper, p, a.castT, side[p].portrait, side[p].name, side[p].special);
+            }
             if (paused)
                 drawPausedOverlay(display);
             cv::imshow(camWin, display);

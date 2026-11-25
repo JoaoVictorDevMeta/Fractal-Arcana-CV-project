@@ -3,7 +3,7 @@
 
 bool Match::cast(int p, Shape s)
 {
-    if (state_ != MatchState::Running || !isCastable(s))
+    if (state_ != MatchState::Running || inIntro() || !isCastable(s))
         return false;
 
     Player &me = players[p];
@@ -22,6 +22,18 @@ bool Match::cast(int p, Shape s)
         me.shieldTime = sp.duration;
         me.shieldBlocks = sp.blocks;
     }
+    else if (sp.type == SpellType::AtaqueEspecial)
+    {
+        // Especial do personagem: carrega (t < 0) e solta um ou mais disparos.
+        // O tempo de carga em segundos vira progresso negativo: t = -atraso / travessia.
+        const SpecialDef &sd = specialDef(me.special);
+        me.cooldown = std::max(me.cooldown, sd.launchDelay + sd.shotGap * (sd.shots - 1));
+        for (int i = 0; i < sd.shots; ++i)
+        {
+            const float delay = sd.launchDelay + sd.shotGap * i;
+            proj_.push_back({p, sp.type, sd.damage, sd.travelTime, -delay / sd.travelTime, me.special});
+        }
+    }
     else
     {
         proj_.push_back({p, sp.type, sp.damage, sp.travelTime, 0.f});
@@ -29,11 +41,67 @@ bool Match::cast(int p, Shape s)
     return true;
 }
 
+void Match::hit_(const Projectile &pr)
+{
+    Player &target = players[1 - pr.owner];
+    Player &caster = players[pr.owner];
+    const bool special = pr.type == SpellType::AtaqueEspecial;
+    const SpecialDef &sd = specialDef(pr.special);
+
+    if (target.shieldBlocks > 0)
+    {
+        if (special && sd.pierceShield)
+        {
+            target.shieldBlocks = 0; // o Olho ve atraves: destroi o escudo e acerta
+            target.shieldTime = 0.f;
+            say_(1 - pr.owner, CombatTextKind::Pierce, "PERFURADO!");
+        }
+        else
+        {
+            if (--target.shieldBlocks == 0)
+                target.shieldTime = 0.f;
+            say_(1 - pr.owner, CombatTextKind::Blocked, "BLOQUEADO!");
+            return;
+        }
+    }
+
+    target.health -= pr.damage;
+    target.hitFlash = kHitFlashTime;
+    say_(1 - pr.owner, CombatTextKind::Damage, "-" + std::to_string(int(pr.damage + 0.5f)));
+
+    // Super armadura: durante a carga do especial o golpe nao interrompe a animacao
+    const bool armored = target.castType == SpellType::AtaqueEspecial && target.castAnim >= 0.f &&
+                         target.castAnim < specialDef(target.special).launchDelay + 0.3f;
+    if (!armored)
+    {
+        target.hitAnim = 0.f;
+        target.hitPower = std::clamp(pr.damage / 40.f, 0.25f, 1.f);
+        target.castAnim = -1.f; // levar o golpe interrompe o movimento
+    }
+
+    if (!special)
+        return;
+    if (sd.drainMana > 0.f)
+    {
+        target.mana = std::max(0.f, target.mana - sd.drainMana);
+        say_(1 - pr.owner, CombatTextKind::Drain, "-" + std::to_string(int(sd.drainMana)) + " MANA");
+    }
+    if (sd.healSelf > 0.f && caster.health > 0.f)
+    {
+        caster.health = std::min(kStartHealth, caster.health + sd.healSelf);
+        say_(pr.owner, CombatTextKind::Heal, "+" + std::to_string(int(sd.healSelf)) + " VIDA");
+    }
+    if (sd.refundMana > 0.f)
+    {
+        caster.mana = std::min(kStartMana, caster.mana + sd.refundMana);
+        say_(pr.owner, CombatTextKind::Mana, "+" + std::to_string(int(sd.refundMana)) + " MANA");
+    }
+}
+
 void Match::update(double dtd)
 {
     const float dt = static_cast<float>(dtd);
 
-    // o efeito de dano termina mesmo depois do golpe final
     // relogios das animacoes (continuam depois do golpe final, para o nocaute terminar)
     auto advance = [dt](float &timer, float maxT)
     {
@@ -47,10 +115,15 @@ void Match::update(double dtd)
     {
         pl.hitFlash = std::max(0.f, pl.hitFlash - dt);
         advance(pl.hitAnim, kHitAnimTime);
-        advance(pl.castAnim, kCastAnimTime);
+        advance(pl.castAnim, pl.castType == SpellType::AtaqueEspecial ? kSpecialAnimTime : kCastAnimTime);
         if (pl.koTime >= 0.f)
             pl.koTime = std::min(kKoAnimMax, pl.koTime + dt);
     }
+    for (CombatText &ct : texts_)
+        ct.age += dt;
+    texts_.erase(std::remove_if(texts_.begin(), texts_.end(),
+                                [](const CombatText &ct) { return ct.age > kCombatTextLife; }),
+                 texts_.end());
 
     if (state_ != MatchState::Running)
         return;
@@ -78,22 +151,9 @@ void Match::update(double dtd)
             ++i;
             continue;
         }
-
-        Player &target = players[1 - proj_[i].owner];
-        if (target.shieldBlocks > 0)
-        {
-            if (--target.shieldBlocks == 0)
-                target.shieldTime = 0.f;
-        }
-        else
-        {
-            target.health -= proj_[i].damage;
-            target.hitFlash = kHitFlashTime;
-            target.hitAnim = 0.f;
-            target.hitPower = std::clamp(proj_[i].damage / 40.f, 0.25f, 1.f);
-            target.castAnim = -1.f; // levar o golpe interrompe o movimento especial
-        }
+        const Projectile pr = proj_[i];
         proj_.erase(proj_.begin() + i);
+        hit_(pr);
     }
 
     if (players[0].health <= 0.f)

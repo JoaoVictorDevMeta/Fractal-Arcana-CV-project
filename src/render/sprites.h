@@ -9,6 +9,13 @@ constexpr int kBarFrameWidth = 240; // largura (px) da moldura das barras de vid
 // Retorna Mat vazia se falhar.
 cv::Mat loadSprite(const std::string &path, int height = 0);
 
+// Redimensiona 'src' para preencher 'size' sem distorcer, cortando o excesso.
+// focusY (0..1) escolhe qual faixa vertical sobra quando a imagem e mais alta (0.3 = rosto).
+cv::Mat coverCrop(const cv::Mat &src, cv::Size size, float focusY = 0.5f);
+
+// Recorta a imagem BGRA na caixa dos pixels visiveis (alfa > 8). Sem alfa, devolve a original.
+cv::Mat cropToAlpha(const cv::Mat &src);
+
 // Desenha 'spr' (BGRA) centrado em 'center', com blend de alfa e clipping nas bordas.
 void drawSprite(cv::Mat &dst, const cv::Mat &spr, cv::Point center);
 std::vector<cv::Mat> loadStrip(const std::string &path, int frameW, int height);
@@ -43,6 +50,7 @@ struct Assets
     BarSkin healthBar, manaBar;                                                        // barras de vida e mana (opcionais; ha fallback no HUD)
     cv::Scalar trailColor[2] = {cv::Scalar(255, 220, 120), cv::Scalar(255, 220, 120)}; // cor do rastro do raio (BGR)
     std::string charId[2];                                                             // personagem de cada lado (define o golpe especial)
+    bool customSpecial[2] = {false, false};                                            // existe especial_<id>.png? (senao: pixel art do codigo)
 
     // p1Id / p2Id: prefixo do personagem (ex: "derzu", "baltar") —
     // os arquivos esperados sao "sprites/players/<id>_player.png" e
