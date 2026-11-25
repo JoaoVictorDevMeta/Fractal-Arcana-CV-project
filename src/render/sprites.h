@@ -42,6 +42,7 @@ struct Assets
     cv::Mat background;                                                                // opcional, BGR
     BarSkin healthBar, manaBar;                                                        // barras de vida e mana (opcionais; ha fallback no HUD)
     cv::Scalar trailColor[2] = {cv::Scalar(255, 220, 120), cv::Scalar(255, 220, 120)}; // cor do rastro do raio (BGR)
+    std::string charId[2];                                                             // personagem de cada lado (define o golpe especial)
 
     // p1Id / p2Id: prefixo do personagem (ex: "derzu", "baltar") —
     // os arquivos esperados sao "sprites/players/<id>_player.png" e

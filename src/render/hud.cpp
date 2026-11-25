@@ -1,5 +1,6 @@
 #include "render/hud.h"
 #include "render/sprites.h"
+#include "render/fighter_anim.h"
 #include "game/match.h"
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
@@ -10,11 +11,10 @@
 #include <string>
 #include <vector>
 
-// Reduz o sprite se ele for mais alto que a arena (em vez de cortar).
+// Reduz o sprite se ele for mais alto que maxH (em vez de cortar).
 // O resultado fica em cache: o resize deixa de acontecer a cada frame.
-static const cv::Mat &fitSprite(const cv::Mat &view, const cv::Mat &spr)
+static const cv::Mat &fitSprite(int maxH, const cv::Mat &spr)
 {
-    const int maxH = view.rows - 4;
     if (maxH <= 0 || spr.empty() || spr.rows <= maxH)
         return spr;
 
@@ -40,6 +40,12 @@ static const cv::Mat &fitSprite(const cv::Mat &view, const cv::Mat &spr)
     return cache.emplace(key, std::move(r)).first->second;
 }
 
+// Cabe na altura da arena.
+static const cv::Mat &fitSprite(const cv::Mat &view, const cv::Mat &spr)
+{
+    return fitSprite(view.rows - 4, spr);
+}
+
 static void drawFit(cv::Mat &view, const cv::Mat &spr, cv::Point center)
 {
     drawSprite(view, fitSprite(view, spr), center);
@@ -51,29 +57,6 @@ static float rnd(int a, int b) // ruido deterministico em [-1, 1]
     h = (h ^ (h >> 13)) * 1274126177u;
     h ^= h >> 16;
     return (h & 0xFFFF) / 65535.f * 2.f - 1.f;
-}
-
-// Copia do sprite misturada com vermelho (preserva o alfa). k01: 0 = original, 1 = mais vermelho.
-static cv::Mat tintRed(const cv::Mat &spr, float k01)
-{
-    cv::Mat out = spr.clone();
-    if (out.empty() || out.depth() != CV_8U || out.channels() < 3)
-        return out;
-
-    const float k = std::clamp(k01, 0.f, 1.f) * 0.65f;
-    const int cn = out.channels();
-    for (int y = 0; y < out.rows; ++y)
-    {
-        uchar *row = out.ptr<uchar>(y);
-        for (int x = 0; x < out.cols; ++x)
-        {
-            uchar *px = row + x * cn;
-            px[0] = uchar(px[0] * (1.f - k) + 40 * k);  // B
-            px[1] = uchar(px[1] * (1.f - k) + 40 * k);  // G
-            px[2] = uchar(px[2] * (1.f - k) + 255 * k); // R
-        }
-    }
-    return out;
 }
 
 // Rastro de raio atras do projetil: head = ponta, dir = +1 (P1) ou -1 (P2).
@@ -338,43 +321,42 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
     const int W = view.cols, H = view.rows;
     const int xs[2] = {160, W - 160};
 
+    // "super" (Ataque Especial): a arena escurece por um instante, como num jogo de luta
+    const float dark = std::max(superDarken(m.anim(0)), superDarken(m.anim(1)));
+    if (dark > 0.f)
+        view.convertTo(view, -1, 1.0 - 0.55 * dark);
+
     // magos e escudos
+    // os magos ocupam ~84% da altura: sobra espaco para pulos e levitacao
+    const int wizardMaxH = std::max(1, int(H * 0.84f));
     for (int p = 0; p < 2; ++p)
     {
+        const FighterAnim anim = m.anim(p);
+
         // brilho atras do mago ao lancar feitico
-        if (glowEffects)
+        if (glowEffects && anim.koT < 0.f)
             drawCastGlow(view, {xs[p], H / 2}, cvRound(H * 0.45f),
                          castGlowColor(m.castType(p)), m.castGlow01(p));
 
         const auto &fr = as.wizard[p];
-        const float hit = m.hitFlash01(p);
-
-        // tremor: deslocamento pseudo-aleatorio que diminui junto com o efeito
-        cv::Point wc(xs[p], H / 2);
-        if (hit > 0.f)
-        {
-            const int tick = int(hit * kHitFlashTime * 60.f); // muda ~60x/s enquanto decai
-            wc.x += int(rnd(tick, p * 2 + 1) * 6.f * hit);
-            wc.y += int(rnd(tick, p * 2 + 2) * 3.f * hit);
-        }
-
+        cv::Point body(xs[p], H / 2);
         if (!fr.empty())
         {
             int f = int(m.time() * 8) % int(fr.size()); // 8 quadros por segundo
-            if (hit > 0.f)
-                drawSprite(view, tintRed(fitSprite(view, fr[f]), hit), wc);
-            else
-                drawFit(view, fr[f], wc);
+            const cv::Mat &spr = fitSprite(wizardMaxH, fr[f]);
+            const cv::Point feet(xs[p], H / 2 + spr.rows / 2); // mesma posicao de antes em repouso
+            body = drawFighter(view, spr, p, feet, anim, moveStyleFor(as.charId[p]),
+                               m.time(), glowEffects);
         }
         else
-            cv::circle(view, wc, 30,
+            cv::circle(view, body, 30,
                        p == 0 ? cv::Scalar(255, 200, 80) : cv::Scalar(80, 200, 255), cv::FILLED);
-        if (m.hasShield(p))
+        if (m.hasShield(p) && anim.koT < 0.f)
         {
             if (!as.shield[p].empty())
-                drawFit(view, as.shield[p], {xs[p], H / 2});
+                drawFit(view, as.shield[p], body);
             else
-                cv::circle(view, {xs[p], H / 2}, 50, {255, 255, 255}, 3);
+                cv::circle(view, body, 50, {255, 255, 255}, 3);
         }
     }
 
@@ -435,8 +417,14 @@ void drawGame(cv::Mat &view, const Match &m, const Assets &as, bool glowEffects)
         cv::add(view, sparkLayer, view);
 
     if (m.state() != MatchState::Running)
-        cv::putText(view, m.state() == MatchState::Player0Won ? "JOGADOR 1 VENCEU" : "JOGADOR 2 VENCEU",
-                    {W / 2 - 200, H / 2 - 55}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {255, 255, 255}, 3);
+    {
+        const int loser = m.state() == MatchState::Player0Won ? 1 : 0;
+        const float koT = m.anim(loser).koT;
+        drawKOBanner(view, koT); // "K.O." primeiro, depois o nome do vencedor
+        if (koT > 1.6f)
+            cv::putText(view, m.state() == MatchState::Player0Won ? "JOGADOR 1 VENCEU" : "JOGADOR 2 VENCEU",
+                        {W / 2 - 200, H / 2 - 55}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {255, 255, 255}, 3);
+    }
 }
 
 // ---------------------------------------------------------------------------

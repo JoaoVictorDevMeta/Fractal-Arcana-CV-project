@@ -15,6 +15,7 @@ bool Match::cast(int p, Shape s)
     me.cooldown = kGlobalCooldown;
     me.castGlow = kCastGlowTime;
     me.castType = sp.type;
+    me.castAnim = 0.f;
 
     if (sp.type == SpellType::Escudo)
     {
@@ -33,8 +34,23 @@ void Match::update(double dtd)
     const float dt = static_cast<float>(dtd);
 
     // o efeito de dano termina mesmo depois do golpe final
+    // relogios das animacoes (continuam depois do golpe final, para o nocaute terminar)
+    auto advance = [dt](float &timer, float maxT)
+    {
+        if (timer < 0.f)
+            return;
+        timer += dt;
+        if (timer > maxT)
+            timer = -1.f;
+    };
     for (Player &pl : players)
+    {
         pl.hitFlash = std::max(0.f, pl.hitFlash - dt);
+        advance(pl.hitAnim, kHitAnimTime);
+        advance(pl.castAnim, kCastAnimTime);
+        if (pl.koTime >= 0.f)
+            pl.koTime = std::min(kKoAnimMax, pl.koTime + dt);
+    }
 
     if (state_ != MatchState::Running)
         return;
@@ -73,12 +89,21 @@ void Match::update(double dtd)
         {
             target.health -= proj_[i].damage;
             target.hitFlash = kHitFlashTime;
+            target.hitAnim = 0.f;
+            target.hitPower = std::clamp(proj_[i].damage / 40.f, 0.25f, 1.f);
+            target.castAnim = -1.f; // levar o golpe interrompe o movimento especial
         }
         proj_.erase(proj_.begin() + i);
     }
 
     if (players[0].health <= 0.f)
+    {
         state_ = MatchState::Player1Won;
+        players[0].koTime = 0.f;
+    }
     else if (players[1].health <= 0.f)
+    {
         state_ = MatchState::Player0Won;
+        players[1].koTime = 0.f;
+    }
 }
